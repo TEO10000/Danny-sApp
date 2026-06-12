@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --masa: #fbf8f3;
+  --corteza: #271c14;
+}
+
+body {
+  background-color: var(--masa);
+  color: var(--corteza);
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
