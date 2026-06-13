@@ -1,0 +1,320 @@
+// Sistema de Gestión Interna de Panadería — Esquema v1.1
+// Dos sucursales (Principal y Consejo), ventas por sobrantes de turno,
+// cierres de caja con fondo fijo de $40 y facturas de proveedores con estados.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ===================== Enums =====================
+
+enum Rol {
+  ADMIN
+  PANADERO
+  ATENCION_CLIENTE
+}
+
+enum CategoriaProducto {
+  PAN_SAL
+  PAN_DULCE
+  PASTELERIA
+  GALLETERIA
+  EMPAQUETADO // leche, avena, etc. (futuro lector de código de barras)
+}
+
+enum TipoTurno {
+  T1_06_14
+  T2_14_22
+}
+
+enum EstadoFactura {
+  PENDIENTE
+  PAGADA
+  PAGO_PARCIAL
+  ANULADA
+}
+
+enum OrigenRegistroFactura {
+  MANUAL
+  ESCANEO_IA
+}
+
+enum OrigenPago {
+  CAJA_TURNO
+  JEFE
+}
+
+enum EstadoPlan {
+  BORRADOR
+  APROBADO
+}
+
+enum TipoConsultaIA {
+  CHAT
+  ESCANEO_FACTURA
+  PLAN_SEMANAL
+}
+
+// ===================== Núcleo =====================
+
+model User {
+  id           String   @id @default(cuid())
+  nombre       String
+  email        String   @unique
+  passwordHash String
+  rol          Rol
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  cochesProduccion CocheProduccion[]
+  cierresTurno     CierreTurno[]
+  facturasRegistradas FacturaProveedor[] @relation("FacturaRegistradaPor")
+  facturasPagadas     FacturaProveedor[] @relation("FacturaPagadaPor")
+  planesAprobados  PlanSemanal[]
+  consultasIA      ConsultaIA[]
+}
+
+model Sucursal {
+  id     String  @id @default(cuid())
+  nombre String  @unique // "Principal" | "Consejo"
+  activa Boolean @default(true)
+
+  cochesProduccion CocheProduccion[]
+  cierresTurno     CierreTurno[]
+  facturas         FacturaProveedor[]
+  ventasCalculadas VentaCalculada[]
+  planesSemanales  PlanSemanal[]
+}
+
+// ===================== Catálogo =====================
+
+model Producto {
+  id           String            @id @default(cuid())
+  nombre       String
+  categoria    CategoriaProducto
+  codigoBarras String?           @unique // preparado para lector inalámbrico futuro
+  activo       Boolean           @default(true)
+
+  precios          PrecioProducto[]
+  detallesCoche    DetalleCoche[]
+  sobrantes        SobranteTurno[]
+  ventasCalculadas VentaCalculada[]
+  campanias        CampaniaProducto[]
+
+  @@index([categoria])
+}
+
+model PrecioProducto {
+  id           String   @id @default(cuid())
+  productoId   String
+  precio       Decimal  @db.Decimal(10, 2)
+  vigenteDesde DateTime @default(now())
+
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@index([productoId, vigenteDesde])
+}
+
+// ===================== Proveedores y facturas =====================
+
+model Insumo {
+  id           String  @id @default(cuid())
+  nombre       String
+  unidadMedida String // kg, quintal, litro, unidad...
+  codigoBarras String? @unique
+
+  compras CompraInsumo[]
+}
+
+model Proveedor {
+  id       String  @id @default(cuid())
+  nombre   String  @unique
+  contacto String?
+  telefono String?
+  activo   Boolean @default(true)
+
+  facturas FacturaProveedor[]
+}
+
+model FacturaProveedor {
+  id             String                @id @default(cuid())
+  proveedorId    String
+  sucursalId     String
+  numero         String?
+  fecha          DateTime
+  montoTotal     Decimal               @db.Decimal(10, 2)
+  estado         EstadoFactura         @default(PENDIENTE)
+  origenRegistro OrigenRegistroFactura @default(MANUAL)
+  imagenUrl      String? // respaldo de la factura escaneada (Vercel Blob)
+  datosIaJson    Json? // extracción cruda de la IA (Fase 4)
+
+  registradaPorId String
+  pagadaPorId     String?
+  fechaPago       DateTime?
+  origenPago      OrigenPago?
+  cierreTurnoId   String? // si se pagó desde la caja de un turno
+
+  proveedor     Proveedor      @relation(fields: [proveedorId], references: [id])
+  sucursal      Sucursal       @relation(fields: [sucursalId], references: [id])
+  registradaPor User           @relation("FacturaRegistradaPor", fields: [registradaPorId], references: [id])
+  pagadaPor     User?          @relation("FacturaPagadaPor", fields: [pagadaPorId], references: [id])
+  cierreTurno   CierreTurno?   @relation(fields: [cierreTurnoId], references: [id])
+  compras       CompraInsumo[]
+
+  @@index([sucursalId, estado])
+  @@index([fecha])
+}
+
+model CompraInsumo {
+  id            String  @id @default(cuid())
+  facturaId     String
+  insumoId      String
+  cantidad      Decimal @db.Decimal(10, 3)
+  costoTotal    Decimal @db.Decimal(10, 2)
+  costoUnitario Decimal @db.Decimal(10, 4)
+
+  factura FacturaProveedor @relation(fields: [facturaId], references: [id])
+  insumo  Insumo           @relation(fields: [insumoId], references: [id])
+
+  @@index([insumoId])
+}
+
+// ===================== Producción =====================
+
+model CocheProduccion {
+  id         String   @id @default(cuid())
+  fecha      DateTime @default(now())
+  sucursalId String // sucursal de destino del coche
+  panaderoId String
+  notas      String?
+
+  sucursal Sucursal       @relation(fields: [sucursalId], references: [id])
+  panadero User           @relation(fields: [panaderoId], references: [id])
+  detalles DetalleCoche[]
+
+  @@index([sucursalId, fecha])
+}
+
+model DetalleCoche {
+  id           String @id @default(cuid())
+  cocheId      String
+  productoId   String
+  numLatas     Int // típicamente 5–14, sin tope rígido
+  panesPorLata Int
+  mermas       Int    @default(0)
+
+  coche    CocheProduccion @relation(fields: [cocheId], references: [id])
+  producto Producto        @relation(fields: [productoId], references: [id])
+}
+
+// ===================== Turnos, caja y ventas =====================
+
+model CierreTurno {
+  id               String    @id @default(cuid())
+  sucursalId       String
+  fecha            DateTime  @db.Date
+  tipoTurno        TipoTurno
+  empleadaId       String
+  fondoInicial     Decimal   @default(40.00) @db.Decimal(10, 2)
+  efectivoContado  Decimal   @db.Decimal(10, 2)
+  efectivoEsperado Decimal   @db.Decimal(10, 2)
+  descuadre        Decimal   @db.Decimal(10, 2) // contado − esperado
+  notas            String?
+  createdAt        DateTime  @default(now())
+
+  sucursal  Sucursal           @relation(fields: [sucursalId], references: [id])
+  empleada  User               @relation(fields: [empleadaId], references: [id])
+  sobrantes SobranteTurno[]
+  facturas  FacturaProveedor[]
+
+  @@unique([sucursalId, fecha, tipoTurno]) // un cierre por turno por sucursal
+  @@index([fecha])
+}
+
+model SobranteTurno {
+  id               String @id @default(cuid())
+  cierreTurnoId    String
+  productoId       String
+  cantidadSobrante Int
+
+  cierreTurno CierreTurno @relation(fields: [cierreTurnoId], references: [id])
+  producto    Producto    @relation(fields: [productoId], references: [id])
+
+  @@unique([cierreTurnoId, productoId])
+}
+
+// Derivada automáticamente al guardar cada cierre de turno:
+// cantidad = sobrante_turno_anterior + producción_del_turno − sobrante − mermas
+model VentaCalculada {
+  id         String    @id @default(cuid())
+  sucursalId String
+  fecha      DateTime  @db.Date
+  tipoTurno  TipoTurno
+  productoId String
+  cantidad   Int
+  valor      Decimal   @db.Decimal(10, 2) // cantidad × precio vigente
+
+  sucursal Sucursal @relation(fields: [sucursalId], references: [id])
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@unique([sucursalId, fecha, tipoTurno, productoId])
+  @@index([fecha])
+  @@index([productoId, fecha])
+}
+
+// ===================== Campañas, IA =====================
+
+model Campania {
+  id          String   @id @default(cuid())
+  nombre      String
+  descripcion String?
+  fechaInicio DateTime
+  fechaFin    DateTime
+  costo       Decimal  @db.Decimal(10, 2)
+  sucursalId  String? // null = ambas sucursales
+
+  productos CampaniaProducto[]
+}
+
+model CampaniaProducto {
+  campaniaId String
+  productoId String
+
+  campania Campania @relation(fields: [campaniaId], references: [id])
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@id([campaniaId, productoId])
+}
+
+model PlanSemanal {
+  id            String     @id @default(cuid())
+  semanaInicio  DateTime   @db.Date
+  sucursalId    String
+  estado        EstadoPlan @default(BORRADOR)
+  generadoPorIa Boolean    @default(true)
+  contenidoJson Json
+  aprobadoPorId String?
+  createdAt     DateTime   @default(now())
+
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
+  aprobadoPor User?   @relation(fields: [aprobadoPorId], references: [id])
+
+  @@unique([semanaInicio, sucursalId])
+}
+
+model ConsultaIA {
+  id        String         @id @default(cuid())
+  userId    String
+  tipo      TipoConsultaIA
+  entrada   String
+  respuesta String
+  fecha     DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
