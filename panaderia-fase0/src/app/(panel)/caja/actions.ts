@@ -27,6 +27,7 @@ const cierreSchema = z.object({
       cantidad: z.coerce.number().int().min(0, "Los sobrantes no pueden ser negativos."),
     })
   ),
+  facturaIds: z.array(z.string()).default([]),
 });
 
 export type EstadoCierre = { ok: boolean; mensaje: string } | null;
@@ -48,6 +49,13 @@ export async function registrarCierre(
     return { ok: false, mensaje: "Los sobrantes llegaron incompletos. Intenta de nuevo." };
   }
 
+  let facturaIdsCrudos: unknown;
+  try {
+    facturaIdsCrudos = JSON.parse(String(formData.get("facturaIds") ?? "[]"));
+  } catch {
+    facturaIdsCrudos = [];
+  }
+
   const parsed = cierreSchema.safeParse({
     sucursalId: formData.get("sucursalId"),
     fecha: formData.get("fecha"),
@@ -55,6 +63,7 @@ export async function registrarCierre(
     efectivoContado: formData.get("efectivoContado"),
     notas: formData.get("notas") ?? "",
     sobrantes: sobrantesCrudos,
+    facturaIds: facturaIdsCrudos,
   });
   if (!parsed.success) {
     return { ok: false, mensaje: parsed.error.errors[0].message };
@@ -70,6 +79,26 @@ export async function registrarCierre(
     };
   }
 
+  // Re-verificar facturas desde la DB (nunca confiar en montos del cliente)
+  const facturasPendientes =
+    d.facturaIds.length > 0
+      ? await prisma.facturaProveedor.findMany({
+          where: {
+            id: { in: d.facturaIds },
+            sucursalId: d.sucursalId,
+            estado: "PENDIENTE",
+          },
+          select: { id: true, montoTotal: true },
+        })
+      : [];
+
+  const pagosDesdeCaja = Math.round(
+    (facturasPendientes as Array<{ id: string; montoTotal: unknown }>).reduce(
+      (s, f) => s + Number(f.montoTotal),
+      0
+    ) * 100
+  ) / 100;
+
   const sobrantePor = new Map(d.sobrantes.map((s) => [s.productoId, s.cantidad]));
 
   let totalVentas = 0;
@@ -82,8 +111,6 @@ export async function registrarCierre(
 
   for (const fila of datos.filas) {
     const sobrante = sobrantePor.get(fila.productoId) ?? 0;
-    // Puede salir negativo si faltó registrar producción: se guarda igual,
-    // el descuadre y el reporte lo harán visible en vez de esconderlo.
     const vendidos = fila.disponible - sobrante;
     const valor = Math.round(vendidos * fila.precio * 100) / 100;
     totalVentas += valor;
@@ -94,22 +121,25 @@ export async function registrarCierre(
   }
   totalVentas = Math.round(totalVentas * 100) / 100;
 
-  // RF-10.2 — pagos a proveedores desde caja: $0 hasta la Fase 3 (facturas)
-  const pagosDesdeCaja = 0;
+  // RF-10.2 — efectivo esperado = fondo + ventas − facturas pagadas desde caja
   const efectivoEsperado =
     Math.round((FONDO_CAJA + totalVentas - pagosDesdeCaja) * 100) / 100;
   const descuadre = Math.round((d.efectivoContado - efectivoEsperado) * 100) / 100;
 
   const fecha = fechaDia(d.fecha);
+  const empleadaId = session.user!.id!;
+  const facturaIdsVerificados = (
+    facturasPendientes as Array<{ id: string; montoTotal: unknown }>
+  ).map((f) => f.id);
 
   try {
-    await prisma.$transaction([
-      prisma.cierreTurno.create({
+    await prisma.$transaction(async (tx) => {
+      const cierre = await tx.cierreTurno.create({
         data: {
           sucursalId: d.sucursalId,
           fecha,
           tipoTurno: d.tipoTurno,
-          empleadaId: session.user.id,
+          empleadaId,
           fondoInicial: FONDO_CAJA,
           efectivoContado: d.efectivoContado,
           efectivoEsperado,
@@ -117,18 +147,34 @@ export async function registrarCierre(
           notas: d.notas,
           sobrantes: { create: sobrantesGuardar },
         },
-      }),
-      prisma.ventaCalculada.createMany({
-        data: ventas.map((v) => ({
-          sucursalId: d.sucursalId,
-          fecha,
-          tipoTurno: d.tipoTurno,
-          productoId: v.productoId,
-          cantidad: v.cantidad,
-          valor: v.valor,
-        })),
-      }),
-    ]);
+      });
+
+      if (ventas.length > 0) {
+        await tx.ventaCalculada.createMany({
+          data: ventas.map((v) => ({
+            sucursalId: d.sucursalId,
+            fecha,
+            tipoTurno: d.tipoTurno,
+            productoId: v.productoId,
+            cantidad: v.cantidad,
+            valor: v.valor,
+          })),
+        });
+      }
+
+      if (facturaIdsVerificados.length > 0) {
+        await tx.facturaProveedor.updateMany({
+          where: { id: { in: facturaIdsVerificados } },
+          data: {
+            estado: "PAGADA",
+            origenPago: "CAJA_TURNO",
+            pagadaPorId: empleadaId,
+            fechaPago: new Date(),
+            cierreTurnoId: cierre.id,
+          },
+        });
+      }
+    });
   } catch {
     return {
       ok: false,
@@ -138,6 +184,7 @@ export async function registrarCierre(
   }
 
   revalidatePath("/caja");
+  revalidatePath("/facturas");
   revalidatePath("/dashboard");
   redirect("/caja?guardado=1");
 }

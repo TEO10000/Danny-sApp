@@ -108,7 +108,34 @@ export default async function CerrarTurnoPage({
   }
 
   // Paso 2: tabla de sobrantes con todo precargado
-  const datos = await datosParaCierre(sucursalId, fecha, turno as TipoTurno);
+  const [datos, facturasCrudas] = await Promise.all([
+    datosParaCierre(sucursalId, fecha, turno as TipoTurno),
+    prisma.facturaProveedor.findMany({
+      where: { sucursalId, estado: "PENDIENTE" },
+      select: {
+        id: true,
+        numero: true,
+        montoTotal: true,
+        proveedor: { select: { nombre: true } },
+      },
+      orderBy: { fecha: "asc" },
+    }),
+  ]);
+
+  const facturasPendientes = (
+    facturasCrudas as Array<{
+      id: string;
+      numero: string | null;
+      montoTotal: unknown;
+      proveedor: { nombre: string };
+    }>
+  ).map((f) => ({
+    id: f.id,
+    numero: f.numero,
+    montoTotal: Number(f.montoTotal),
+    proveedor: f.proveedor,
+  }));
+
   const sucursalNombre = sucursales.find((s) => s.id === sucursalId)?.nombre ?? "";
 
   if (datos.yaCerrado) {
@@ -163,6 +190,7 @@ export default async function CerrarTurnoPage({
         fecha={fecha}
         tipoTurno={turno}
         filas={datos.filas}
+        facturasPendientes={facturasPendientes}
       />
     </div>
   );

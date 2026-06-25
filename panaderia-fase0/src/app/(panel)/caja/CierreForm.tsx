@@ -13,6 +13,13 @@ type Fila = {
   disponible: number;
 };
 
+type FacturaPendiente = {
+  id: string;
+  numero: string | null;
+  montoTotal: number;
+  proveedor: { nombre: string };
+};
+
 const inputCls =
   "w-full rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2.5 text-base outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30";
 
@@ -34,16 +41,19 @@ export function CierreForm({
   fecha,
   tipoTurno,
   filas,
+  facturasPendientes = [],
 }: {
   sucursalId: string;
   fecha: string;
   tipoTurno: string;
   filas: Fila[];
+  facturasPendientes?: FacturaPendiente[];
 }) {
   const [sobrantes, setSobrantes] = useState<Record<string, string>>(
     Object.fromEntries(filas.map((f) => [f.productoId, ""]))
   );
   const [contado, setContado] = useState("");
+  const [facturasMarcadas, setFacturasMarcadas] = useState<Set<string>>(new Set());
   const [estado, accion] = useFormState<EstadoCierre, FormData>(registrarCierre, null);
 
   const calculo = useMemo(() => {
@@ -58,11 +68,15 @@ export function CierreForm({
       totalVentas += valor;
       porFila.set(f.productoId, { vendidos, valor });
     }
-    const esperado = 40 + totalVentas; // − pagos desde caja (Fase 3)
+    const totalFacturas = Array.from(facturasMarcadas).reduce((sum, id) => {
+      const fp = facturasPendientes.find((f) => f.id === id);
+      return sum + (fp?.montoTotal ?? 0);
+    }, 0);
+    const esperado = 40 + totalVentas - totalFacturas;
     const cont = parseFloat(contado) || 0;
     const descuadre = cont - esperado;
-    return { totalVentas, esperado, descuadre, porFila, hayNegativos };
-  }, [filas, sobrantes, contado]);
+    return { totalVentas, totalFacturas, esperado, descuadre, porFila, hayNegativos };
+  }, [filas, sobrantes, contado, facturasMarcadas, facturasPendientes]);
 
   const sobrantesJson = JSON.stringify(
     filas.map((f) => ({
@@ -70,6 +84,7 @@ export function CierreForm({
       cantidad: parseInt(sobrantes[f.productoId], 10) || 0,
     }))
   );
+  const facturaIdsJson = JSON.stringify([...facturasMarcadas]);
 
   return (
     <form action={accion} className="space-y-5">
@@ -77,6 +92,7 @@ export function CierreForm({
       <input type="hidden" name="fecha" value={fecha} />
       <input type="hidden" name="tipoTurno" value={tipoTurno} />
       <input type="hidden" name="sobrantes" value={sobrantesJson} />
+      <input type="hidden" name="facturaIds" value={facturaIdsJson} />
 
       <section className="overflow-hidden rounded-panel border border-masa-200 bg-white">
         <div className="grid grid-cols-[1fr_5rem_5.5rem] items-center gap-2 border-b border-masa-200 bg-masa-50 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-corteza-600 sm:grid-cols-[1fr_6rem_6rem_6rem]">
@@ -149,6 +165,51 @@ export function CierreForm({
         </p>
       )}
 
+      {/* Facturas pendientes de caja */}
+      {facturasPendientes.length > 0 && (
+        <section className="rounded-panel border border-masa-200 bg-white p-5">
+          <h3 className="font-bold text-corteza-900">Facturas pagadas desde esta caja</h3>
+          <p className="mt-1 text-xs text-corteza-400">
+            Marca las facturas que pagaste con el efectivo de este turno. Se descontarán del
+            efectivo esperado.
+          </p>
+          <ul className="mt-3 divide-y divide-masa-100">
+            {facturasPendientes.map((fp) => (
+              <li key={fp.id} className="flex items-center gap-3 py-2.5">
+                <input
+                  type="checkbox"
+                  id={`fp-${fp.id}`}
+                  checked={facturasMarcadas.has(fp.id)}
+                  onChange={(e) => {
+                    setFacturasMarcadas((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(fp.id);
+                      else next.delete(fp.id);
+                      return next;
+                    });
+                  }}
+                  className="h-5 w-5 rounded border-masa-200 accent-horno-500"
+                />
+                <label htmlFor={`fp-${fp.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
+                  <span>
+                    <span className="font-semibold text-corteza-900">{fp.proveedor.nombre}</span>
+                    {fp.numero && (
+                      <span className="ml-1.5 text-corteza-400">#{fp.numero}</span>
+                    )}
+                  </span>
+                  <span className="font-bold text-corteza-900">${fp.montoTotal.toFixed(2)}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {calculo.totalFacturas > 0 && (
+            <p className="mt-2 text-right text-sm font-semibold text-corteza-600">
+              Total facturas: −${calculo.totalFacturas.toFixed(2)}
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="rounded-panel border border-masa-200 bg-white p-5">
         <h3 className="font-bold text-corteza-900">Caja</h3>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -195,13 +256,18 @@ export function CierreForm({
             <dd className="text-lg font-bold text-corteza-900">
               ${calculo.totalVentas.toFixed(2)}
             </dd>
+            {calculo.totalFacturas > 0 && (
+              <dd className="text-xs text-corteza-400">−${calculo.totalFacturas.toFixed(2)} facturas</dd>
+            )}
           </div>
           <div>
             <dt className="text-corteza-400">Debe haber en caja</dt>
             <dd className="text-lg font-bold text-corteza-900">
               ${calculo.esperado.toFixed(2)}
             </dd>
-            <dd className="text-xs text-corteza-400">$40 fondo + ventas</dd>
+            <dd className="text-xs text-corteza-400">
+              $40 fondo + ventas{calculo.totalFacturas > 0 ? " − facturas" : ""}
+            </dd>
           </div>
           <div>
             <dt className="text-corteza-400">Cuadre</dt>
