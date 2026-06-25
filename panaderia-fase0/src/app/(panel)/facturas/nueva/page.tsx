@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { insumosConUltimoCosto } from "@/lib/facturas";
-import { FacturaForm } from "../FacturaForm";
+import { FormConEscaner } from "./FormConEscaner";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ export default async function NuevaFacturaPage() {
         <div>
           <h2 className="text-xl font-bold text-corteza-900">Registrar factura</h2>
           <p className="mt-1 text-sm text-corteza-600">
-            Ingresa los datos de la factura del proveedor y los insumos recibidos.
+            Escanea la factura con IA o ingrésala manualmente.
           </p>
         </div>
         <Link
@@ -41,7 +41,7 @@ export default async function NuevaFacturaPage() {
         </Link>
       </div>
 
-      <FacturaForm
+      <FormConEscaner
         proveedores={proveedores}
         insumos={insumos}
         sucursales={sucursales}

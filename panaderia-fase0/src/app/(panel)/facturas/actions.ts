@@ -40,6 +40,10 @@ const crearFacturaSchema = z
     fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha no es válida"),
     numero: z.string().nullable().optional(),
     lineas: z.array(lineaSchema).min(1, "Agrega al menos una línea"),
+    // Campos opcionales para el flujo de escaneo IA (compatibles con registro manual)
+    origenRegistro: z.enum(["MANUAL", "ESCANEO_IA"]).optional(),
+    imagenUrl: z.string().nullable().optional(),
+    datosIaJson: z.unknown().optional(),
   })
   .refine((d) => d.proveedorId || d.proveedorNuevo, {
     message: "Elige o crea un proveedor",
@@ -123,7 +127,10 @@ export async function crearFactura(
           fecha: new Date(d.fecha + "T00:00:00-05:00"),
           montoTotal,
           estado: "PENDIENTE",
-          origenRegistro: "MANUAL",
+          origenRegistro: d.origenRegistro ?? "MANUAL",
+          imagenUrl: d.imagenUrl ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ...(d.datosIaJson !== undefined && { datosIaJson: d.datosIaJson as any }),
           registradaPorId: session.user!.id!,
           compras: { create: compras },
         },

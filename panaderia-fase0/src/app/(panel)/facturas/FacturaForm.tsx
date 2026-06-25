@@ -18,6 +18,22 @@ type LineaEstado = {
   costoTotal: string;
 };
 
+// Props opcionales para pre-llenar el formulario desde un escaneo IA
+export type ValoresInicialesFactura = {
+  proveedorId?: string;
+  proveedorNuevo?: { nombre: string; contacto?: string | null; telefono?: string | null };
+  numero?: string | null;
+  fecha?: string;
+  lineas?: Array<{
+    insumoId?: string;
+    insumoNuevo?: { nombre: string; unidadMedida: string };
+    cantidad: number;
+    costoTotal: number;
+  }>;
+  origenRegistro?: "MANUAL" | "ESCANEO_IA";
+  datosIaJson?: unknown;
+};
+
 const inputCls =
   "w-full rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2.5 text-base outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30";
 const labelCls = "block text-sm font-semibold text-corteza-800";
@@ -35,35 +51,76 @@ function BotonGuardar({ disabled }: { disabled: boolean }) {
   );
 }
 
+function lineasDesdeIniciales(
+  iniciales: ValoresInicialesFactura["lineas"]
+): LineaEstado[] {
+  if (!iniciales || iniciales.length === 0) {
+    return [
+      {
+        uid: "1",
+        insumoId: "",
+        insumoNuevoNombre: "",
+        insumoNuevoUnidad: "",
+        cantidad: "",
+        costoTotal: "",
+      },
+    ];
+  }
+  return iniciales.map((l, i) => ({
+    uid: String(i + 1),
+    insumoId: l.insumoId ?? (l.insumoNuevo ? "__nuevo__" : ""),
+    insumoNuevoNombre: l.insumoNuevo?.nombre ?? "",
+    insumoNuevoUnidad: l.insumoNuevo?.unidadMedida ?? "",
+    cantidad: l.cantidad > 0 ? String(l.cantidad) : "",
+    costoTotal: l.costoTotal > 0 ? String(l.costoTotal) : "",
+  }));
+}
+
 export function FacturaForm({
   proveedores,
   insumos,
   sucursales,
   hoy,
+  valoresIniciales,
 }: {
   proveedores: Proveedor[];
   insumos: InsumoConUltimoCosto[];
   sucursales: Sucursal[];
   hoy: string;
+  valoresIniciales?: ValoresInicialesFactura;
 }) {
+  // Determinar ID de proveedor inicial
+  const initProveedorId = valoresIniciales?.proveedorId
+    ? valoresIniciales.proveedorId
+    : valoresIniciales?.proveedorNuevo
+    ? "__nuevo__"
+    : "";
+
   // Estado del proveedor
-  const [proveedorId, setProveedorId] = useState("");
-  const [provNombre, setProvNombre] = useState("");
-  const [provContacto, setProvContacto] = useState("");
-  const [provTelefono, setProvTelefono] = useState("");
+  const [proveedorId, setProveedorId] = useState(initProveedorId);
+  const [provNombre, setProvNombre] = useState(
+    valoresIniciales?.proveedorNuevo?.nombre ?? ""
+  );
+  const [provContacto, setProvContacto] = useState(
+    valoresIniciales?.proveedorNuevo?.contacto ?? ""
+  );
+  const [provTelefono, setProvTelefono] = useState(
+    valoresIniciales?.proveedorNuevo?.telefono ?? ""
+  );
 
   // Metadatos de la factura
   const [sucursalId, setSucursalId] = useState(sucursales[0]?.id ?? "");
-  const [fecha, setFecha] = useState(hoy);
-  const [numero, setNumero] = useState("");
+  const [fecha, setFecha] = useState(valoresIniciales?.fecha ?? hoy);
+  const [numero, setNumero] = useState(valoresIniciales?.numero ?? "");
 
   // Líneas de compra
-  const siguienteUid = useRef(2);
-  const [lineas, setLineas] = useState<LineaEstado[]>([
-    { uid: "1", insumoId: "", insumoNuevoNombre: "", insumoNuevoUnidad: "", cantidad: "", costoTotal: "" },
-  ]);
+  const lineasInicio = lineasDesdeIniciales(valoresIniciales?.lineas);
+  const siguienteUid = useRef(lineasInicio.length + 1);
+  const [lineas, setLineas] = useState<LineaEstado[]>(lineasInicio);
 
   const [estado, accion] = useFormState<EstadoFactura, FormData>(crearFactura, null);
+
+  const origenRegistro = valoresIniciales?.origenRegistro ?? "MANUAL";
 
   const agregarLinea = () => {
     setLineas((prev) => [
@@ -127,7 +184,7 @@ export function FacturaForm({
     return true;
   }, [sucursalId, fecha, proveedorId, provNombre, lineas]);
 
-  // Serialización del payload (sigue el patrón de sobrantes en CierreForm)
+  // Serialización del payload
   const payload = JSON.stringify({
     proveedorId: proveedorId !== "__nuevo__" ? proveedorId : undefined,
     proveedorNuevo:
@@ -150,11 +207,21 @@ export function FacturaForm({
       cantidad: parseFloat(l.cantidad) || 0,
       costoTotal: parseFloat(l.costoTotal) || 0,
     })),
+    origenRegistro,
+    datosIaJson: valoresIniciales?.datosIaJson ?? undefined,
   });
 
   return (
     <form action={accion} className="space-y-5">
       <input type="hidden" name="payload" value={payload} />
+
+      {/* Banner IA */}
+      {origenRegistro === "ESCANEO_IA" && (
+        <div className="rounded-lg border border-horno-400 bg-horno-500/10 px-4 py-3 text-sm text-horno-700">
+          Datos pre-llenados por la IA. Verifica el monto de cada línea, elige la sucursal
+          correcta y corrige cualquier campo antes de guardar.
+        </div>
+      )}
 
       {/* Proveedor */}
       <section className="rounded-panel border border-masa-200 bg-white p-5 space-y-4">
