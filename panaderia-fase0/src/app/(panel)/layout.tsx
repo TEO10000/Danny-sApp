@@ -9,6 +9,9 @@ const NAV: Array<{ href: string; etiqueta: string; roles: string[] }> = [
   { href: "/facturas", etiqueta: "Facturas", roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { href: "/catalogo", etiqueta: "Catálogo", roles: ["ADMIN"] },
   { href: "/precios", etiqueta: "Precios", roles: ["PANADERO", "ATENCION_CLIENTE"] },
+  { href: "/campanias", etiqueta: "Campañas", roles: ["ADMIN"] },
+  { href: "/plan-semanal", etiqueta: "Plan Semanal", roles: ["ADMIN", "PANADERO"] },
+  { href: "/chat-ia", etiqueta: "Chat IA", roles: ["ADMIN"] },
 ];
 
 export default async function PanelLayout({
