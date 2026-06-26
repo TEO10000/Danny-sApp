@@ -75,7 +75,7 @@ export async function crearFactura(
   const d = parsed.data;
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: typeof prisma) => {
       // Resolver o crear proveedor
       let proveedorId: string;
       if (d.proveedorId) {

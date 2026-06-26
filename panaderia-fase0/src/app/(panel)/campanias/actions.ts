@@ -57,7 +57,7 @@ export async function crearCampania(formData: FormData): Promise<ResultadoCampan
   }
 
   try {
-    const campania = await prisma.$transaction(async (tx) => {
+    const campania = await prisma.$transaction(async (tx: typeof prisma) => {
       const c = await tx.campania.create({
         data: {
           nombre,
@@ -114,7 +114,7 @@ export async function editarCampania(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: typeof prisma) => {
       await tx.campania.update({
         where: { id },
         data: {
@@ -147,7 +147,7 @@ export async function eliminarCampania(id: string): Promise<ResultadoCampania> {
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: typeof prisma) => {
       await tx.campaniaProducto.deleteMany({ where: { campaniaId: id } });
       await tx.campania.delete({ where: { id } });
     });

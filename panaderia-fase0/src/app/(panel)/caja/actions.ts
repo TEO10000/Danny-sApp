@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { datosParaCierre, fechaDia, type TipoTurno } from "@/lib/turnos";
 
 const FONDO_CAJA = 40; // RF-10.1: cada turno abre y cierra con $40
@@ -133,7 +134,7 @@ export async function registrarCierre(
   ).map((f) => f.id);
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const cierre = await tx.cierreTurno.create({
         data: {
           sucursalId: d.sucursalId,

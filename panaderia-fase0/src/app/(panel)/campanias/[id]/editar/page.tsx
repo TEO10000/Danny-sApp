@@ -33,7 +33,7 @@ export default async function EditarCampaniaPage({ params }: Props) {
     fechaFin: campania.fechaFin.toISOString().slice(0, 10),
     costo: Number(campania.costo),
     sucursalId: campania.sucursalId,
-    productosIds: campania.productos.map((cp) => cp.productoId),
+    productosIds: campania.productos.map((cp: { productoId: string }) => cp.productoId),
   };
 
   return (
