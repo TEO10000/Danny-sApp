@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 async function exigirAdmin() {
   const session = await auth();
@@ -57,7 +58,7 @@ export async function crearCampania(formData: FormData): Promise<ResultadoCampan
   }
 
   try {
-    const campania = await prisma.$transaction(async (tx: typeof prisma) => {
+    const campania = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const c = await tx.campania.create({
         data: {
           nombre,
@@ -114,7 +115,7 @@ export async function editarCampania(
   }
 
   try {
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.campania.update({
         where: { id },
         data: {
@@ -147,7 +148,7 @@ export async function eliminarCampania(id: string): Promise<ResultadoCampania> {
   }
 
   try {
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.campaniaProducto.deleteMany({ where: { campaniaId: id } });
       await tx.campania.delete({ where: { id } });
     });

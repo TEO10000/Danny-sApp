@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 export type EstadoFactura = { ok: boolean; mensaje: string } | null;
 
@@ -75,7 +76,7 @@ export async function crearFactura(
   const d = parsed.data;
 
   try {
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Resolver o crear proveedor
       let proveedorId: string;
       if (d.proveedorId) {
