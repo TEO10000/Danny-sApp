@@ -48,6 +48,8 @@ type CierreFila = {
   fecha: Date;
   tipoTurno: string;
   descuadre: unknown;
+  efectivoEsperado: unknown;
+  totalTransferencias: unknown;
   empleada: { nombre: string };
   sucursal: { nombre: string };
 };
@@ -252,6 +254,14 @@ export default async function DashboardPage({
     cierresFilas.reduce((s, c) => s + Number(c.descuadre), 0) * 100
   ) / 100;
 
+  // Desglose por canal: efectivo = (efectivoEsperado - 40), transferencias = totalTransferencias
+  const totalEfectivoCanal = Math.round(
+    cierresFilas.reduce((s, c) => s + Number(c.efectivoEsperado) - 40, 0) * 100
+  ) / 100;
+  const totalTransferenciasCanal = Math.round(
+    cierresFilas.reduce((s, c) => s + Number(c.totalTransferencias), 0) * 100
+  ) / 100;
+
   const fmtFechaCierre = new Intl.DateTimeFormat("es-EC", {
     day: "numeric",
     month: "short",
@@ -397,7 +407,7 @@ export default async function DashboardPage({
       {/* ── 4. Caja ── */}
       <section className="rounded-panel border border-masa-200 bg-white p-5 space-y-3">
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="font-bold text-corteza-900">Descuadres de caja</h3>
+          <h3 className="font-bold text-corteza-900">Caja del período</h3>
           <span
             className={`text-xl font-bold ${
               Math.abs(totalDescuadre) < 0.005
@@ -412,6 +422,22 @@ export default async function DashboardPage({
               : `${totalDescuadre < 0 ? "Falta" : "Sobra"} ${dinero(Math.abs(totalDescuadre))}`}
           </span>
         </div>
+
+        {cierresFilas.length > 0 && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-masa-50 p-3">
+              <p className="text-lg font-bold text-corteza-900">{dinero(totalEfectivoCanal)}</p>
+              <p className="text-xs text-corteza-600 mt-0.5">Efectivo (caja)</p>
+            </div>
+            {totalTransferenciasCanal > 0 && (
+              <div className="rounded-lg bg-horno-500/10 p-3">
+                <p className="text-lg font-bold text-horno-700">{dinero(totalTransferenciasCanal)}</p>
+                <p className="text-xs text-corteza-600 mt-0.5">Transferencias</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {mayoresDescuadres.length === 0 ? (
           <p className="text-sm text-cuadre-ok">Todos los turnos cuadraron en este período.</p>
         ) : (

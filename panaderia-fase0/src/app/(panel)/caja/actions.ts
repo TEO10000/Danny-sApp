@@ -12,6 +12,18 @@ import { registrarAuditoria } from "@/lib/auditoria";
 
 const FONDO_CAJA = 40; // RF-10.1: cada turno abre y cierra con $40
 
+const transferenciasSchema = z.object({
+  sugeridasConfirmadasIds: z.array(z.string()).default([]),
+  manuales: z
+    .array(
+      z.object({
+        monto: z.number().positive().max(10000, "Monto de transferencia fuera de rango."),
+        referencia: z.string().trim().optional(),
+      })
+    )
+    .default([]),
+});
+
 const cierreSchema = z.object({
   sucursalId: z.string().min(1, "Elige la sucursal."),
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha no es válida."),
@@ -59,6 +71,19 @@ export async function registrarCierre(
     facturaIdsCrudos = [];
   }
 
+  let transferenciasData: z.infer<typeof transferenciasSchema>;
+  try {
+    const raw = JSON.parse(String(formData.get("transferencias") ?? "{}"));
+    const parsedTrans = transferenciasSchema.safeParse(raw);
+    if (!parsedTrans.success) {
+      transferenciasData = { sugeridasConfirmadasIds: [], manuales: [] };
+    } else {
+      transferenciasData = parsedTrans.data;
+    }
+  } catch {
+    transferenciasData = { sugeridasConfirmadasIds: [], manuales: [] };
+  }
+
   const parsed = cierreSchema.safeParse({
     sucursalId: formData.get("sucursalId"),
     fecha: formData.get("fecha"),
@@ -102,6 +127,36 @@ export async function registrarCierre(
     ) * 100
   ) / 100;
 
+  // Re-verificar transferencias sugeridas desde la DB (montos siempre desde BD)
+  const datosVentana = datos; // ya tenemos inicioVentana y finVentana
+  const sugeridasVerificadas =
+    transferenciasData.sugeridasConfirmadasIds.length > 0
+      ? await prisma.transferenciaTurno.findMany({
+          where: {
+            id: { in: transferenciasData.sugeridasConfirmadasIds },
+            sucursalId: d.sucursalId,
+            estado: "SUGERIDA",
+            ...(datosVentana.inicioVentana
+              ? { hora: { gt: datosVentana.inicioVentana, lte: datosVentana.finVentana } }
+              : { hora: { lte: datosVentana.finVentana } }),
+          },
+          select: { id: true, monto: true },
+        })
+      : [];
+
+  const totalSugeridasConf = Math.round(
+    (sugeridasVerificadas as Array<{ id: string; monto: unknown }>).reduce(
+      (s, t) => s + Number(t.monto),
+      0
+    ) * 100
+  ) / 100;
+
+  const totalManuales = Math.round(
+    transferenciasData.manuales.reduce((s, m) => s + m.monto, 0) * 100
+  ) / 100;
+
+  const totalTransferencias = Math.round((totalSugeridasConf + totalManuales) * 100) / 100;
+
   const sobrantePor = new Map(d.sobrantes.map((s) => [s.productoId, s.cantidad]));
 
   let totalVentas = 0;
@@ -124,9 +179,9 @@ export async function registrarCierre(
   }
   totalVentas = Math.round(totalVentas * 100) / 100;
 
-  // RF-10.2 — efectivo esperado = fondo + ventas − facturas pagadas desde caja
+  // RF-10.2 — efectivo esperado = fondo + ventas − facturas − transferencias confirmadas
   const efectivoEsperado =
-    Math.round((FONDO_CAJA + totalVentas - pagosDesdeCaja) * 100) / 100;
+    Math.round((FONDO_CAJA + totalVentas - pagosDesdeCaja - totalTransferencias) * 100) / 100;
   const descuadre = Math.round((d.efectivoContado - efectivoEsperado) * 100) / 100;
 
   const fecha = fechaDia(d.fecha);
@@ -134,6 +189,26 @@ export async function registrarCierre(
   const facturaIdsVerificados = (
     facturasPendientes as Array<{ id: string; montoTotal: unknown }>
   ).map((f) => f.id);
+
+  const sugeridasVerificadasIds = (
+    sugeridasVerificadas as Array<{ id: string; monto: unknown }>
+  ).map((t) => t.id);
+
+  // IDs de sugeridas en ventana que NO confirmó la empleada → DESCARTADA
+  const todasSugeridasEnVentana = await prisma.transferenciaTurno.findMany({
+    where: {
+      sucursalId: d.sucursalId,
+      estado: "SUGERIDA",
+      cierreTurnoId: null,
+      ...(datosVentana.inicioVentana
+        ? { hora: { gt: datosVentana.inicioVentana, lte: datosVentana.finVentana } }
+        : { hora: { lte: datosVentana.finVentana } }),
+    },
+    select: { id: true },
+  });
+  const descartadasIds = todasSugeridasEnVentana
+    .map((t) => t.id)
+    .filter((id) => !sugeridasVerificadasIds.includes(id));
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -147,6 +222,7 @@ export async function registrarCierre(
           efectivoContado: d.efectivoContado,
           efectivoEsperado,
           descuadre,
+          totalTransferencias,
           notas: d.notas,
           sobrantes: { create: sobrantesGuardar },
         },
@@ -174,6 +250,36 @@ export async function registrarCierre(
             pagadaPorId: empleadaId,
             fechaPago: new Date(),
             cierreTurnoId: cierre.id,
+          },
+        });
+      }
+
+      // Confirmar sugeridas verificadas
+      if (sugeridasVerificadasIds.length > 0) {
+        await tx.transferenciaTurno.updateMany({
+          where: { id: { in: sugeridasVerificadasIds } },
+          data: { estado: "CONFIRMADA", cierreTurnoId: cierre.id },
+        });
+      }
+
+      // Descartar sugeridas no confirmadas de la ventana
+      if (descartadasIds.length > 0) {
+        await tx.transferenciaTurno.updateMany({
+          where: { id: { in: descartadasIds } },
+          data: { estado: "DESCARTADA", cierreTurnoId: cierre.id },
+        });
+      }
+
+      // Crear transferencias manuales
+      for (const m of transferenciasData.manuales) {
+        await tx.transferenciaTurno.create({
+          data: {
+            sucursalId: d.sucursalId,
+            cierreTurnoId: cierre.id,
+            monto: m.monto,
+            referencia: m.referencia ?? null,
+            estado: "CONFIRMADA",
+            origen: "MANUAL",
           },
         });
       }
@@ -362,6 +468,15 @@ export async function eliminarCierre(
         });
       }
 
+      // Revertir transferencias: CORREO → SUGERIDA, MANUAL → eliminar
+      await tx.transferenciaTurno.updateMany({
+        where: { cierreTurnoId: id, origen: "CORREO" },
+        data: { estado: "SUGERIDA", cierreTurnoId: null },
+      });
+      await tx.transferenciaTurno.deleteMany({
+        where: { cierreTurnoId: id, origen: "MANUAL" },
+      });
+
       // Borrar ventas calculadas
       await tx.ventaCalculada.deleteMany({
         where: { sucursalId: cierre.sucursalId, fecha: cierre.fecha, tipoTurno: tipo },
@@ -404,4 +519,128 @@ export async function eliminarCierre(
   revalidatePath("/facturas");
   revalidatePath("/dashboard");
   redirect("/caja?eliminado=1");
+}
+
+// ── Edición de transferencias de un cierre (solo ADMIN) ───────────────────────
+
+const editarTransferenciasSchema = z.object({
+  cierreId: z.string().min(1),
+  confirmadasIds: z.array(z.string()).default([]),
+  manualesNuevas: z
+    .array(
+      z.object({
+        monto: z.number().positive().max(10000),
+        referencia: z.string().trim().optional(),
+      })
+    )
+    .default([]),
+});
+
+export async function editarTransferencias(
+  _prev: EstadoCierre,
+  formData: FormData
+): Promise<EstadoCierre> {
+  const session = await auth();
+  if (session?.user?.rol !== "ADMIN") {
+    return { ok: false, mensaje: "Solo el administrador puede editar transferencias." };
+  }
+  const adminId = session.user.id!;
+
+  let confirmadasIdsCrudos: unknown;
+  let manualesNuevasCrudas: unknown;
+  try {
+    confirmadasIdsCrudos = JSON.parse(String(formData.get("confirmadasIds") ?? "[]"));
+    manualesNuevasCrudas = JSON.parse(String(formData.get("manualesNuevas") ?? "[]"));
+  } catch {
+    return { ok: false, mensaje: "Datos de transferencias inválidos." };
+  }
+
+  const parsed = editarTransferenciasSchema.safeParse({
+    cierreId: formData.get("cierreId"),
+    confirmadasIds: confirmadasIdsCrudos,
+    manualesNuevas: manualesNuevasCrudas,
+  });
+  if (!parsed.success) {
+    return { ok: false, mensaje: parsed.error.errors[0].message };
+  }
+  const d = parsed.data;
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Cargar todas las transferencias de este cierre (excepto MANUAL ya confirmadas — las dejamos)
+      const todas = await tx.transferenciaTurno.findMany({
+        where: { cierreTurnoId: d.cierreId, origen: "CORREO" },
+        select: { id: true, estado: true, monto: true },
+      });
+
+      const cambios: Array<{ campo: string; valorAnterior: string; valorNuevo: string }> = [];
+
+      for (const t of todas) {
+        const debeConfirmar = d.confirmadasIds.includes(t.id);
+        const estadoNuevo = debeConfirmar ? "CONFIRMADA" : "DESCARTADA";
+        if (t.estado !== estadoNuevo) {
+          cambios.push({
+            campo: `transferencia:${t.id}:estado`,
+            valorAnterior: t.estado,
+            valorNuevo: estadoNuevo,
+          });
+          await tx.transferenciaTurno.update({
+            where: { id: t.id },
+            data: { estado: estadoNuevo },
+          });
+        }
+      }
+
+      // Crear manuales nuevas
+      for (const m of d.manualesNuevas) {
+        const cierre = await tx.cierreTurno.findUniqueOrThrow({
+          where: { id: d.cierreId },
+          select: { sucursalId: true },
+        });
+        const nueva = await tx.transferenciaTurno.create({
+          data: {
+            sucursalId: cierre.sucursalId,
+            cierreTurnoId: d.cierreId,
+            monto: m.monto,
+            referencia: m.referencia ?? null,
+            estado: "CONFIRMADA",
+            origen: "MANUAL",
+          },
+        });
+        cambios.push({
+          campo: `transferencia:${nueva.id}:nueva`,
+          valorAnterior: "(ninguna)",
+          valorNuevo: `MANUAL $${m.monto}`,
+        });
+      }
+
+      await recalcularCierre(tx, d.cierreId);
+
+      const tipo = (
+        await tx.cierreTurno.findUniqueOrThrow({
+          where: { id: d.cierreId },
+          select: { tipoTurno: true, fecha: true, sucursalId: true },
+        })
+      ) as { tipoTurno: string; fecha: Date; sucursalId: string };
+      const finActual = finDeTurno(strDeFechaDia(tipo.fecha), tipo.tipoTurno as TipoTurno);
+      const sig = await cierreSiguiente(tx, tipo.sucursalId, finActual);
+      if (sig) await recalcularCierre(tx, sig.id);
+
+      if (cambios.length > 0) {
+        await registrarAuditoria(tx, {
+          entidad: "TransferenciaTurno",
+          entidadId: d.cierreId,
+          accion: "EDITAR",
+          cambios,
+          userId: adminId,
+        });
+      }
+    });
+  } catch {
+    return { ok: false, mensaje: "No se pudieron guardar los cambios de transferencias." };
+  }
+
+  revalidatePath("/caja");
+  revalidatePath("/dashboard");
+  return { ok: true, mensaje: "Transferencias actualizadas y cierre recalculado." };
 }

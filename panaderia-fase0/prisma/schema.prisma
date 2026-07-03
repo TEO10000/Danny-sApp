@@ -61,6 +61,17 @@ enum TipoConsultaIA {
   PLAN_SEMANAL
 }
 
+enum EstadoTransferencia {
+  SUGERIDA
+  CONFIRMADA
+  DESCARTADA
+}
+
+enum OrigenTransferencia {
+  CORREO
+  MANUAL
+}
+
 // ===================== Núcleo =====================
 
 model User {
@@ -91,6 +102,7 @@ model Sucursal {
   facturas         FacturaProveedor[]
   ventasCalculadas VentaCalculada[]
   planesSemanales  PlanSemanal[]
+  transferencias   TransferenciaTurno[]
 }
 
 // ===================== Catálogo =====================
@@ -220,22 +232,24 @@ model DetalleCoche {
 // ===================== Turnos, caja y ventas =====================
 
 model CierreTurno {
-  id               String    @id @default(cuid())
-  sucursalId       String
-  fecha            DateTime  @db.Date
-  tipoTurno        TipoTurno
-  empleadaId       String
-  fondoInicial     Decimal   @default(40.00) @db.Decimal(10, 2)
-  efectivoContado  Decimal   @db.Decimal(10, 2)
-  efectivoEsperado Decimal   @db.Decimal(10, 2)
-  descuadre        Decimal   @db.Decimal(10, 2) // contado − esperado
-  notas            String?
-  createdAt        DateTime  @default(now())
+  id                  String    @id @default(cuid())
+  sucursalId          String
+  fecha               DateTime  @db.Date
+  tipoTurno           TipoTurno
+  empleadaId          String
+  fondoInicial        Decimal   @default(40.00) @db.Decimal(10, 2)
+  efectivoContado     Decimal   @db.Decimal(10, 2)
+  efectivoEsperado    Decimal   @db.Decimal(10, 2)
+  descuadre           Decimal   @db.Decimal(10, 2) // contado − esperado
+  totalTransferencias Decimal   @default(0) @db.Decimal(10, 2)
+  notas               String?
+  createdAt           DateTime  @default(now())
 
-  sucursal  Sucursal           @relation(fields: [sucursalId], references: [id])
-  empleada  User               @relation(fields: [empleadaId], references: [id])
-  sobrantes SobranteTurno[]
-  facturas  FacturaProveedor[]
+  sucursal      Sucursal              @relation(fields: [sucursalId], references: [id])
+  empleada      User                  @relation(fields: [empleadaId], references: [id])
+  sobrantes     SobranteTurno[]
+  facturas      FacturaProveedor[]
+  transferencias TransferenciaTurno[]
 
   @@unique([sucursalId, fecha, tipoTurno]) // un cierre por turno por sucursal
   @@index([fecha])
@@ -321,6 +335,28 @@ model ConsultaIA {
   fecha     DateTime       @default(now())
 
   user User @relation(fields: [userId], references: [id])
+}
+
+// ===================== Transferencias bancarias =====================
+
+model TransferenciaTurno {
+  id            String              @id @default(cuid())
+  sucursalId    String
+  cierreTurnoId String?             // null mientras es sugerencia sin cierre
+  monto         Decimal             @db.Decimal(10, 2)
+  referencia    String?             // nro. de comprobante/documento del banco
+  remitente     String?             // nombre de quien transfirió, si el correo lo trae
+  hora          DateTime?           // momento de la transferencia
+  messageId     String?             @unique // Message-ID del correo: idempotencia
+  estado        EstadoTransferencia @default(SUGERIDA)
+  origen        OrigenTransferencia
+  createdAt     DateTime            @default(now())
+
+  sucursal    Sucursal     @relation(fields: [sucursalId], references: [id])
+  cierreTurno CierreTurno? @relation(fields: [cierreTurnoId], references: [id])
+
+  @@index([sucursalId, estado])
+  @@index([cierreTurnoId])
 }
 
 // ===================== Auditoría =====================

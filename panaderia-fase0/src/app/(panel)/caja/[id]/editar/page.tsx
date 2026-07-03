@@ -23,6 +23,10 @@ export default async function EditarCierrePage({ params }: { params: { id: strin
     include: {
       sobrantes: { select: { productoId: true, cantidadSobrante: true } },
       sucursal: { select: { nombre: true } },
+      transferencias: {
+        orderBy: { hora: "asc" },
+        select: { id: true, monto: true, referencia: true, remitente: true, hora: true, estado: true, origen: true },
+      },
     },
   });
   if (!cierre) notFound();
@@ -62,6 +66,16 @@ export default async function EditarCierrePage({ params }: { params: { id: strin
         filas={filas}
         efectivoContadoInicial={Number(cierre.efectivoContado)}
         notasInicial={cierre.notas ?? ""}
+        totalTransferenciasActual={Number(cierre.totalTransferencias)}
+        transferencias={cierre.transferencias.map((t) => ({
+          id: t.id,
+          monto: Number(t.monto),
+          referencia: t.referencia,
+          remitente: t.remitente,
+          hora: t.hora?.toISOString() ?? null,
+          estado: t.estado as "CONFIRMADA" | "DESCARTADA",
+          origen: t.origen as "CORREO" | "MANUAL",
+        }))}
       />
     </div>
   );

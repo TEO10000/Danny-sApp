@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { datosParaCierre, TURNOS, etiquetaTurno, type TipoTurno } from "@/lib/turnos";
+import { leerTransferencias } from "@/lib/banco";
 import { CierreForm } from "../CierreForm";
 
 export const dynamic = "force-dynamic";
@@ -168,6 +169,56 @@ export default async function CerrarTurnoPage({
     );
   }
 
+  // Leer transferencias del buzón del banco para este turno
+  const resultadoBanco = await leerTransferencias(
+    sucursalNombre,
+    datos.inicioVentana,
+    datos.finVentana
+  );
+
+  // Persistir sugeridas (upsert por messageId — idempotente)
+  if (resultadoBanco.ok && resultadoBanco.transferencias.length > 0) {
+    for (const t of resultadoBanco.transferencias) {
+      if (!t.messageId) continue;
+      await prisma.transferenciaTurno.upsert({
+        where: { messageId: t.messageId },
+        update: {}, // no sobreescribir si ya existe
+        create: {
+          sucursalId,
+          monto: t.monto,
+          referencia: t.referencia ?? null,
+          remitente: t.remitente ?? null,
+          hora: t.hora ?? null,
+          messageId: t.messageId,
+          estado: "SUGERIDA",
+          origen: "CORREO",
+        },
+      });
+    }
+  }
+
+  // Cargar todas las SUGERIDAS de esta sucursal con hora en la ventana del turno
+  const sugeridas = await prisma.transferenciaTurno.findMany({
+    where: {
+      sucursalId,
+      estado: "SUGERIDA",
+      cierreTurnoId: null,
+      ...(datos.inicioVentana
+        ? { hora: { gt: datos.inicioVentana, lte: datos.finVentana } }
+        : { hora: { lte: datos.finVentana } }),
+    },
+    orderBy: { hora: "asc" },
+  });
+
+  const transferenciasParaForm = sugeridas.map((t) => ({
+    id: t.id,
+    monto: Number(t.monto),
+    referencia: t.referencia,
+    remitente: t.remitente,
+    hora: t.hora?.toISOString() ?? null,
+    origen: t.origen as "CORREO" | "MANUAL",
+  }));
+
   return (
     <div className="space-y-5">
       <div>
@@ -191,6 +242,8 @@ export default async function CerrarTurnoPage({
         tipoTurno={turno}
         filas={datos.filas}
         facturasPendientes={facturasPendientes}
+        transferencias={transferenciasParaForm}
+        errorBanco={resultadoBanco.ok ? null : resultadoBanco.motivo}
       />
     </div>
   );

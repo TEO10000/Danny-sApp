@@ -20,8 +20,24 @@ type FacturaPendiente = {
   proveedor: { nombre: string };
 };
 
+type TransferenciaSugerida = {
+  id: string;
+  monto: number;
+  referencia: string | null;
+  remitente: string | null;
+  hora: string | null;
+  origen: "CORREO" | "MANUAL";
+};
+
 const inputCls =
   "w-full rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2.5 text-base outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30";
+
+const fmtHoraEC = new Intl.DateTimeFormat("es-EC", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "America/Guayaquil",
+  hour12: false,
+});
 
 function BotonGuardar() {
   const { pending } = useFormStatus();
@@ -42,18 +58,26 @@ export function CierreForm({
   tipoTurno,
   filas,
   facturasPendientes = [],
+  transferencias = [],
+  errorBanco = null,
 }: {
   sucursalId: string;
   fecha: string;
   tipoTurno: string;
   filas: Fila[];
   facturasPendientes?: FacturaPendiente[];
+  transferencias?: TransferenciaSugerida[];
+  errorBanco?: string | null;
 }) {
   const [sobrantes, setSobrantes] = useState<Record<string, string>>(
     Object.fromEntries(filas.map((f) => [f.productoId, ""]))
   );
   const [contado, setContado] = useState("");
   const [facturasMarcadas, setFacturasMarcadas] = useState<Set<string>>(new Set());
+  const [transConfirmadas, setTransConfirmadas] = useState<Set<string>>(
+    new Set(transferencias.map((t) => t.id))
+  );
+  const [manuales, setManuales] = useState<Array<{ monto: string; referencia: string }>>([]);
   const [estado, accion] = useFormState<EstadoCierre, FormData>(registrarCierre, null);
 
   const calculo = useMemo(() => {
@@ -72,11 +96,17 @@ export function CierreForm({
       const fp = facturasPendientes.find((f) => f.id === id);
       return sum + (fp?.montoTotal ?? 0);
     }, 0);
-    const esperado = 40 + totalVentas - totalFacturas;
+    const totalTransConf = Array.from(transConfirmadas).reduce((sum, id) => {
+      const t = transferencias.find((t) => t.id === id);
+      return sum + (t?.monto ?? 0);
+    }, 0);
+    const totalManuales = manuales.reduce((sum, m) => sum + (parseFloat(m.monto) || 0), 0);
+    const totalTransferencias = totalTransConf + totalManuales;
+    const esperado = 40 + totalVentas - totalFacturas - totalTransferencias;
     const cont = parseFloat(contado) || 0;
     const descuadre = cont - esperado;
-    return { totalVentas, totalFacturas, esperado, descuadre, porFila, hayNegativos };
-  }, [filas, sobrantes, contado, facturasMarcadas, facturasPendientes]);
+    return { totalVentas, totalFacturas, totalTransferencias, esperado, descuadre, porFila, hayNegativos };
+  }, [filas, sobrantes, contado, facturasMarcadas, facturasPendientes, transConfirmadas, transferencias, manuales]);
 
   const sobrantesJson = JSON.stringify(
     filas.map((f) => ({
@@ -85,6 +115,24 @@ export function CierreForm({
     }))
   );
   const facturaIdsJson = JSON.stringify([...facturasMarcadas]);
+  const transferenciasJson = JSON.stringify({
+    sugeridasConfirmadasIds: [...transConfirmadas],
+    manuales: manuales
+      .filter((m) => parseFloat(m.monto) > 0)
+      .map((m) => ({ monto: parseFloat(m.monto), referencia: m.referencia || undefined })),
+  });
+
+  function agregarManual() {
+    setManuales((prev) => [...prev, { monto: "", referencia: "" }]);
+  }
+  function actualizarManual(idx: number, campo: "monto" | "referencia", valor: string) {
+    setManuales((prev) => prev.map((m, i) => (i === idx ? { ...m, [campo]: valor } : m)));
+  }
+  function quitarManual(idx: number) {
+    setManuales((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  const hayTransferencias = transferencias.length > 0 || manuales.length > 0;
 
   return (
     <form action={accion} className="space-y-5">
@@ -93,6 +141,7 @@ export function CierreForm({
       <input type="hidden" name="tipoTurno" value={tipoTurno} />
       <input type="hidden" name="sobrantes" value={sobrantesJson} />
       <input type="hidden" name="facturaIds" value={facturaIdsJson} />
+      <input type="hidden" name="transferencias" value={transferenciasJson} />
 
       <section className="overflow-hidden rounded-panel border border-masa-200 bg-white">
         <div className="grid grid-cols-[1fr_5rem_5.5rem] items-center gap-2 border-b border-masa-200 bg-masa-50 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-corteza-600 sm:grid-cols-[1fr_6rem_6rem_6rem]">
@@ -210,6 +259,124 @@ export function CierreForm({
         </section>
       )}
 
+      {/* Transferencias del turno */}
+      <section className="rounded-panel border border-masa-200 bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="font-bold text-corteza-900">Transferencias del turno</h3>
+            <p className="mt-0.5 text-xs text-corteza-400">
+              Pagos recibidos por transferencia (Banco Pichincha). Se descuentan del efectivo esperado.
+            </p>
+          </div>
+          <a
+            href={`/caja/cerrar?sucursal=${sucursalId}&fecha=${fecha}&turno=${tipoTurno}`}
+            className="rounded-lg border border-masa-200 px-3 py-1.5 text-xs font-semibold text-corteza-600 hover:bg-masa-100"
+          >
+            Actualizar
+          </a>
+        </div>
+
+        {errorBanco && (
+          <p role="alert" className="mt-3 rounded-lg bg-masa-100 px-3 py-2 text-sm text-corteza-600">
+            No se pudo leer el correo del banco: {errorBanco}. Registra las transferencias a mano.
+          </p>
+        )}
+
+        {transferencias.length > 0 && (
+          <ul className="mt-3 divide-y divide-masa-100">
+            {transferencias.map((t) => (
+              <li key={t.id} className="flex items-center gap-3 py-2.5">
+                <input
+                  type="checkbox"
+                  id={`tr-${t.id}`}
+                  checked={transConfirmadas.has(t.id)}
+                  onChange={(e) => {
+                    setTransConfirmadas((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(t.id);
+                      else next.delete(t.id);
+                      return next;
+                    });
+                  }}
+                  className="h-5 w-5 rounded border-masa-200 accent-horno-500"
+                />
+                <label htmlFor={`tr-${t.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
+                  <span>
+                    <span className="font-semibold text-corteza-900">${t.monto.toFixed(2)}</span>
+                    {t.hora && (
+                      <span className="ml-1.5 text-corteza-400">
+                        {fmtHoraEC.format(new Date(t.hora))}
+                      </span>
+                    )}
+                    {t.referencia && (
+                      <span className="ml-1.5 text-corteza-400">#{t.referencia}</span>
+                    )}
+                    {t.remitente && (
+                      <span className="ml-1.5 text-xs text-corteza-400"> · {t.remitente}</span>
+                    )}
+                  </span>
+                  <span className="rounded-full bg-masa-100 px-2 py-0.5 text-xs text-corteza-500">
+                    correo
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Transferencias manuales */}
+        {manuales.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {manuales.map((m, idx) => (
+              <li key={idx} className="flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="Monto $"
+                  value={m.monto}
+                  onChange={(e) => actualizarManual(idx, "monto", e.target.value)}
+                  className={`${inputCls} w-32`}
+                />
+                <input
+                  type="text"
+                  placeholder="Ref. / nota (opcional)"
+                  value={m.referencia}
+                  onChange={(e) => actualizarManual(idx, "referencia", e.target.value)}
+                  className={`${inputCls} flex-1`}
+                />
+                <button
+                  type="button"
+                  onClick={() => quitarManual(idx)}
+                  className="rounded-lg border border-masa-200 px-2.5 py-2 text-xs font-semibold text-corteza-500 hover:bg-masa-100"
+                >
+                  Quitar
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <button
+          type="button"
+          onClick={agregarManual}
+          className={`mt-3 rounded-lg border px-3 py-2 text-sm font-semibold ${
+            errorBanco
+              ? "border-horno-400 bg-horno-50 text-horno-700 hover:bg-horno-100"
+              : "border-masa-200 text-corteza-600 hover:bg-masa-100"
+          }`}
+        >
+          + Agregar transferencia manual
+        </button>
+
+        {hayTransferencias && calculo.totalTransferencias > 0 && (
+          <p className="mt-2 text-right text-sm font-semibold text-corteza-600">
+            Total transferencias: −${calculo.totalTransferencias.toFixed(2)}
+          </p>
+        )}
+      </section>
+
       <section className="rounded-panel border border-masa-200 bg-white p-5">
         <h3 className="font-bold text-corteza-900">Caja</h3>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -259,6 +426,9 @@ export function CierreForm({
             {calculo.totalFacturas > 0 && (
               <dd className="text-xs text-corteza-400">−${calculo.totalFacturas.toFixed(2)} facturas</dd>
             )}
+            {calculo.totalTransferencias > 0 && (
+              <dd className="text-xs text-corteza-400">−${calculo.totalTransferencias.toFixed(2)} transf.</dd>
+            )}
           </div>
           <div>
             <dt className="text-corteza-400">Debe haber en caja</dt>
@@ -266,7 +436,9 @@ export function CierreForm({
               ${calculo.esperado.toFixed(2)}
             </dd>
             <dd className="text-xs text-corteza-400">
-              $40 fondo + ventas{calculo.totalFacturas > 0 ? " − facturas" : ""}
+              $40 fondo + ventas
+              {calculo.totalFacturas > 0 ? " − facturas" : ""}
+              {calculo.totalTransferencias > 0 ? " − transf." : ""}
             </dd>
           </div>
           <div>

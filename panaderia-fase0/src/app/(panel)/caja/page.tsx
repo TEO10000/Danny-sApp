@@ -19,6 +19,7 @@ type CierreListado = {
   efectivoContado: unknown;
   efectivoEsperado: unknown;
   descuadre: unknown;
+  totalTransferencias: unknown;
   notas: string | null;
   sucursal: { nombre: string };
   empleada: { nombre: string };
@@ -118,9 +119,11 @@ export default async function CajaPage({
                       )}
                     </div>
                     <p className="mt-1 text-sm text-corteza-600">
-                      Ventas ${(Number(c.efectivoEsperado) - 40).toFixed(2)} · contado $
-                      {Number(c.efectivoContado).toFixed(2)} (debía haber $
-                      {Number(c.efectivoEsperado).toFixed(2)})
+                      Ventas ${(Number(c.efectivoEsperado) - 40 + Number(c.totalTransferencias)).toFixed(2)}
+                      {Number(c.totalTransferencias) > 0
+                        ? ` · Efectivo $${(Number(c.efectivoEsperado) - 40).toFixed(2)} · Transf. $${Number(c.totalTransferencias).toFixed(2)}`
+                        : ""}
+                      {" "}· contado ${Number(c.efectivoContado).toFixed(2)} (debía ${Number(c.efectivoEsperado).toFixed(2)})
                     </p>
                     <p className="mt-1 text-sm text-corteza-400">
                       {c.empleada.nombre}

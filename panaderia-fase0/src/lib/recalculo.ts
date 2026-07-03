@@ -13,7 +13,7 @@ export async function recalcularCierre(
   tx: Prisma.TransactionClient,
   cierreId: string
 ): Promise<void> {
-  // 1. Cargar el cierre con sus sobrantes y facturas de caja
+  // 1. Cargar el cierre con sus sobrantes, facturas de caja y transferencias confirmadas
   const cierre = await tx.cierreTurno.findUniqueOrThrow({
     where: { id: cierreId },
     include: {
@@ -21,6 +21,10 @@ export async function recalcularCierre(
       facturas: {
         where: { origenPago: "CAJA_TURNO" },
         select: { montoTotal: true },
+      },
+      transferencias: {
+        where: { estado: "CONFIRMADA" },
+        select: { monto: true },
       },
     },
   });
@@ -84,16 +88,21 @@ export async function recalcularCierre(
     await tx.ventaCalculada.createMany({ data: ventas });
   }
 
-  // 7. Recalcular efectivoEsperado y descuadre
+  // 7. Recalcular efectivoEsperado, totalTransferencias y descuadre
   const pagosDesdeCaja = Math.round(
     cierre.facturas.reduce((s, f) => s + Number(f.montoTotal), 0) * 100
   ) / 100;
-  const efectivoEsperado = Math.round((FONDO_CAJA + totalVentas - pagosDesdeCaja) * 100) / 100;
+  const totalTransferencias = Math.round(
+    cierre.transferencias.reduce((s, t) => s + Number(t.monto), 0) * 100
+  ) / 100;
+  const efectivoEsperado = Math.round(
+    (FONDO_CAJA + totalVentas - pagosDesdeCaja - totalTransferencias) * 100
+  ) / 100;
   const descuadre = Math.round((Number(cierre.efectivoContado) - efectivoEsperado) * 100) / 100;
 
   await tx.cierreTurno.update({
     where: { id: cierreId },
-    data: { efectivoEsperado, descuadre },
+    data: { efectivoEsperado, descuadre, totalTransferencias },
   });
 }
 
