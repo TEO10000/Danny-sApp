@@ -6,7 +6,9 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { datosParaCierre, fechaDia, type TipoTurno } from "@/lib/turnos";
+import { datosParaCierre, fechaDia, finDeTurno, strDeFechaDia, type TipoTurno } from "@/lib/turnos";
+import { recalcularCierre, cierreSiguiente } from "@/lib/recalculo";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 const FONDO_CAJA = 40; // RF-10.1: cada turno abre y cierra con $40
 
@@ -188,4 +190,218 @@ export async function registrarCierre(
   revalidatePath("/facturas");
   revalidatePath("/dashboard");
   redirect("/caja?guardado=1");
+}
+
+// ── Schemas compartidos para edición ─────────────────────────────────────────
+
+const editarCierreSchema = z.object({
+  id: z.string().min(1),
+  efectivoContado: z.coerce.number().min(0, "El efectivo contado no puede ser negativo."),
+  notas: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .nullable(),
+  sobrantes: z.array(
+    z.object({
+      productoId: z.string().min(1),
+      cantidad: z.coerce.number().int().min(0, "Los sobrantes no pueden ser negativos."),
+    })
+  ),
+});
+
+export async function editarCierre(
+  _prev: EstadoCierre,
+  formData: FormData
+): Promise<EstadoCierre> {
+  const session = await auth();
+  if (session?.user?.rol !== "ADMIN") {
+    return { ok: false, mensaje: "Solo el administrador puede editar cierres." };
+  }
+  const adminId = session.user.id!;
+
+  let sobrantesCrudos: unknown;
+  try {
+    sobrantesCrudos = JSON.parse(String(formData.get("sobrantes") ?? "[]"));
+  } catch {
+    return { ok: false, mensaje: "Los sobrantes llegaron incompletos." };
+  }
+
+  const parsed = editarCierreSchema.safeParse({
+    id: formData.get("id"),
+    efectivoContado: formData.get("efectivoContado"),
+    notas: formData.get("notas") ?? "",
+    sobrantes: sobrantesCrudos,
+  });
+  if (!parsed.success) {
+    return { ok: false, mensaje: parsed.error.errors[0].message };
+  }
+  const d = parsed.data;
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const actual = await tx.cierreTurno.findUniqueOrThrow({
+        where: { id: d.id },
+        include: { sobrantes: true },
+      });
+
+      const cambios: Array<{ campo: string; valorAnterior: string; valorNuevo: string }> = [];
+
+      // Comparar efectivo
+      if (Number(actual.efectivoContado) !== d.efectivoContado) {
+        cambios.push({
+          campo: "efectivoContado",
+          valorAnterior: String(Number(actual.efectivoContado)),
+          valorNuevo: String(d.efectivoContado),
+        });
+      }
+
+      // Comparar notas
+      const notasAnterior = actual.notas ?? null;
+      if (notasAnterior !== d.notas) {
+        cambios.push({
+          campo: "notas",
+          valorAnterior: notasAnterior ?? "(vacío)",
+          valorNuevo: d.notas ?? "(vacío)",
+        });
+      }
+
+      // Comparar y upsert sobrantes
+      const sobranteActualPor = new Map(
+        actual.sobrantes.map((s) => [s.productoId, s.cantidadSobrante])
+      );
+      for (const s of d.sobrantes) {
+        const anterior = sobranteActualPor.get(s.productoId) ?? 0;
+        if (anterior !== s.cantidad) {
+          cambios.push({
+            campo: `sobrante:${s.productoId}`,
+            valorAnterior: String(anterior),
+            valorNuevo: String(s.cantidad),
+          });
+        }
+        await tx.sobranteTurno.upsert({
+          where: { cierreTurnoId_productoId: { cierreTurnoId: d.id, productoId: s.productoId } },
+          update: { cantidadSobrante: s.cantidad },
+          create: { cierreTurnoId: d.id, productoId: s.productoId, cantidadSobrante: s.cantidad },
+        });
+      }
+
+      // Actualizar cabecera
+      await tx.cierreTurno.update({
+        where: { id: d.id },
+        data: { efectivoContado: d.efectivoContado, notas: d.notas },
+      });
+
+      // Recalcular este cierre
+      await recalcularCierre(tx, d.id);
+
+      // Recalcular el siguiente si existe (cascada 1 nivel)
+      const tipo = actual.tipoTurno as TipoTurno;
+      const finActual = finDeTurno(strDeFechaDia(actual.fecha), tipo);
+      const sig = await cierreSiguiente(tx, actual.sucursalId, finActual);
+      if (sig) {
+        await recalcularCierre(tx, sig.id);
+      }
+
+      if (cambios.length > 0) {
+        await registrarAuditoria(tx, {
+          entidad: "CierreTurno",
+          entidadId: d.id,
+          accion: "EDITAR",
+          cambios,
+          userId: adminId,
+        });
+      }
+    });
+  } catch {
+    return { ok: false, mensaje: "No se pudo guardar la edición del cierre." };
+  }
+
+  revalidatePath("/caja");
+  revalidatePath("/dashboard");
+  redirect("/caja?editado=1");
+}
+
+export async function eliminarCierre(
+  _prev: EstadoCierre,
+  formData: FormData
+): Promise<EstadoCierre> {
+  const session = await auth();
+  if (session?.user?.rol !== "ADMIN") {
+    return { ok: false, mensaje: "Solo el administrador puede eliminar cierres." };
+  }
+  const adminId = session.user.id!;
+
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false, mensaje: "ID de cierre inválido." };
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const cierre = await tx.cierreTurno.findUniqueOrThrow({
+        where: { id },
+        include: { sobrantes: true, facturas: { where: { origenPago: "CAJA_TURNO" } } },
+      });
+
+      const tipo = cierre.tipoTurno as TipoTurno;
+      const finActual = finDeTurno(strDeFechaDia(cierre.fecha), tipo);
+
+      // Obtener el siguiente ANTES de borrar
+      const sig = await cierreSiguiente(tx, cierre.sucursalId, finActual);
+
+      // Revertir facturas de caja a PENDIENTE
+      if (cierre.facturas.length > 0) {
+        await tx.facturaProveedor.updateMany({
+          where: { id: { in: cierre.facturas.map((f) => f.id) } },
+          data: {
+            estado: "PENDIENTE",
+            origenPago: null,
+            pagadaPorId: null,
+            fechaPago: null,
+            cierreTurnoId: null,
+          },
+        });
+      }
+
+      // Borrar ventas calculadas
+      await tx.ventaCalculada.deleteMany({
+        where: { sucursalId: cierre.sucursalId, fecha: cierre.fecha, tipoTurno: tipo },
+      });
+
+      // Snapshot para auditoría
+      const snapshot = JSON.stringify({
+        fecha: strDeFechaDia(cierre.fecha),
+        tipo,
+        sucursalId: cierre.sucursalId,
+        sobrantes: cierre.sobrantes.length,
+        facturas: cierre.facturas.length,
+      });
+
+      // Auditar ANTES de borrar (para que el userId exista)
+      await tx.auditLog.create({
+        data: {
+          entidad: "CierreTurno",
+          entidadId: id,
+          accion: "ELIMINAR",
+          valorAnterior: snapshot,
+          userId: adminId,
+        },
+      });
+
+      // Borrar sobrantes y cierre
+      await tx.sobranteTurno.deleteMany({ where: { cierreTurnoId: id } });
+      await tx.cierreTurno.delete({ where: { id } });
+
+      // Recalcular el siguiente (ahora su "anterior" es el previo-previo)
+      if (sig) {
+        await recalcularCierre(tx, sig.id);
+      }
+    });
+  } catch {
+    return { ok: false, mensaje: "No se pudo eliminar el cierre." };
+  }
+
+  revalidatePath("/caja");
+  revalidatePath("/facturas");
+  revalidatePath("/dashboard");
+  redirect("/caja?eliminado=1");
 }

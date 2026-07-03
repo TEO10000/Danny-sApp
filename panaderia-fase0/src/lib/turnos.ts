@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { productosConPrecio } from "@/lib/catalogo";
 
@@ -23,7 +24,7 @@ export function fechaDia(fechaStr: string): Date {
   return new Date(`${fechaStr}T00:00:00.000Z`);
 }
 
-function strDeFechaDia(fecha: Date): string {
+export function strDeFechaDia(fecha: Date): string {
   return fecha.toISOString().slice(0, 10);
 }
 
@@ -66,11 +67,16 @@ type CocheVentana = {
 export async function datosParaCierre(
   sucursalId: string,
   fechaStr: string,
-  tipo: TipoTurno
+  tipo: TipoTurno,
+  opts?: {
+    tx?: Prisma.TransactionClient;
+    preciosPorProducto?: Map<string, number>;
+  }
 ): Promise<DatosCierre> {
+  const client = opts?.tx ?? (prisma as unknown as Prisma.TransactionClient);
   const finVentana = finDeTurno(fechaStr, tipo);
 
-  const cierresPrevios = (await prisma.cierreTurno.findMany({
+  const cierresPrevios = (await client.cierreTurno.findMany({
     where: { sucursalId },
     orderBy: { fecha: "desc" },
     take: 60,
@@ -90,7 +96,7 @@ export async function datosParaCierre(
   }
   const inicioVentana = anterior ? new Date(mejorFin) : null;
 
-  const coches = (await prisma.cocheProduccion.findMany({
+  const coches = (await client.cocheProduccion.findMany({
     where: {
       sucursalId,
       fecha: { lte: finVentana, ...(inicioVentana ? { gt: inicioVentana } : {}) },
@@ -124,10 +130,11 @@ export async function datosParaCierre(
   const filas: FilaCierre[] = productos.map((p) => {
     const ant = anteriorPor.get(p.id) ?? 0;
     const prod = producidoPor.get(p.id) ?? 0;
+    const precio = opts?.preciosPorProducto?.get(p.id) ?? p.precioVigente ?? 0;
     return {
       productoId: p.id,
       nombre: p.nombre,
-      precio: p.precioVigente ?? 0,
+      precio,
       anterior: ant,
       producido: prod,
       disponible: ant + prod,

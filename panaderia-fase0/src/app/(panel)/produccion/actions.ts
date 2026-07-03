@@ -5,6 +5,10 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { hoyEcuador } from "@/lib/cierres";
+import { recalcularCierre, cierreQueContieneTimestamp } from "@/lib/recalculo";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 const detalleSchema = z.object({
   productoId: z.string().min(1, "Elige el pan de cada fila."),
@@ -88,4 +92,150 @@ export async function registrarCoche(
 
   revalidatePath("/produccion");
   redirect("/produccion?guardado=1");
+}
+
+export async function editarCoche(
+  _prev: EstadoCoche,
+  formData: FormData
+): Promise<EstadoCoche> {
+  const session = await auth();
+  const rol = session?.user?.rol;
+  if (!session?.user?.id || (rol !== "ADMIN" && rol !== "PANADERO")) {
+    return { ok: false, mensaje: "No tienes permiso para editar producción." };
+  }
+  const userId = session.user.id;
+
+  const cocheId = String(formData.get("cocheId") ?? "");
+  if (!cocheId) return { ok: false, mensaje: "ID de coche inválido." };
+
+  let detallesCrudos: unknown;
+  try {
+    detallesCrudos = JSON.parse(String(formData.get("detalles") ?? "[]"));
+  } catch {
+    return { ok: false, mensaje: "Los datos del coche llegaron incompletos." };
+  }
+
+  const parsed = cocheSchema.safeParse({
+    sucursalId: formData.get("sucursalId"),
+    fecha: formData.get("fecha"),
+    hora: formData.get("hora"),
+    notas: formData.get("notas") ?? "",
+    detalles: detallesCrudos,
+  });
+  if (!parsed.success) {
+    return { ok: false, mensaje: parsed.error.errors[0].message };
+  }
+
+  for (const d of parsed.data.detalles) {
+    if (d.mermas > d.numLatas * d.panesPorLata) {
+      return { ok: false, mensaje: "Las mermas de una fila superan los panes producidos." };
+    }
+  }
+
+  const nuevaFecha = new Date(`${parsed.data.fecha}T${parsed.data.hora}:00-05:00`);
+  if (Number.isNaN(nuevaFecha.getTime())) {
+    return { ok: false, mensaje: "La fecha no es válida." };
+  }
+
+  let cierresAfectadosIds: string[] = [];
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const cocheActual = await tx.cocheProduccion.findUniqueOrThrow({
+        where: { id: cocheId },
+        include: { detalles: true },
+      });
+
+      // Permisos: PANADERO solo sus coches de hoy
+      if (rol === "PANADERO") {
+        if (cocheActual.panaderoId !== userId) {
+          throw new Error("PERMISO: solo puedes editar tus propios coches.");
+        }
+        const cocheEnEcuador = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Guayaquil",
+        }).format(cocheActual.fecha);
+        if (cocheEnEcuador !== hoyEcuador()) {
+          throw new Error("PERMISO: solo puedes editar coches del día de hoy.");
+        }
+      }
+
+      // Cierres afectados: el de la fecha anterior y el de la nueva (pueden coincidir)
+      const cierreAntes = await cierreQueContieneTimestamp(tx, cocheActual.sucursalId, cocheActual.fecha);
+      const cierreNueva = await cierreQueContieneTimestamp(tx, parsed.data.sucursalId, nuevaFecha);
+
+      const afectados = new Set<string>();
+      if (cierreAntes) afectados.add(cierreAntes.id);
+      if (cierreNueva) afectados.add(cierreNueva.id);
+      cierresAfectadosIds = [...afectados];
+
+      // Construir cambios para auditoría
+      const cambios: Array<{ campo: string; valorAnterior: string; valorNuevo: string }> = [];
+      if (cocheActual.sucursalId !== parsed.data.sucursalId) {
+        cambios.push({ campo: "sucursalId", valorAnterior: cocheActual.sucursalId, valorNuevo: parsed.data.sucursalId });
+      }
+      const fechaAnteriorStr = cocheActual.fecha.toISOString();
+      const fechaNuevaStr = nuevaFecha.toISOString();
+      if (fechaAnteriorStr !== fechaNuevaStr) {
+        cambios.push({ campo: "fecha", valorAnterior: fechaAnteriorStr, valorNuevo: fechaNuevaStr });
+      }
+      if ((cocheActual.notas ?? null) !== (parsed.data.notas ?? null)) {
+        cambios.push({ campo: "notas", valorAnterior: cocheActual.notas ?? "(vacío)", valorNuevo: parsed.data.notas ?? "(vacío)" });
+      }
+      // Resumen de detalles
+      const detallesAnterior = cocheActual.detalles
+        .map((d) => `${d.numLatas}×${d.panesPorLata} p${d.productoId.slice(-4)}`)
+        .join(", ");
+      const detallesNuevo = parsed.data.detalles
+        .map((d) => `${d.numLatas}×${d.panesPorLata} p${d.productoId.slice(-4)}`)
+        .join(", ");
+      if (detallesAnterior !== detallesNuevo) {
+        cambios.push({ campo: "detalles", valorAnterior: detallesAnterior, valorNuevo: detallesNuevo });
+      }
+
+      // Actualizar coche: reemplazar detalles y actualizar cabecera
+      await tx.detalleCoche.deleteMany({ where: { cocheId } });
+      await tx.cocheProduccion.update({
+        where: { id: cocheId },
+        data: {
+          sucursalId: parsed.data.sucursalId,
+          fecha: nuevaFecha,
+          notas: parsed.data.notas,
+          detalles: {
+            create: parsed.data.detalles.map((d) => ({
+              productoId: d.productoId,
+              numLatas: d.numLatas,
+              panesPorLata: d.panesPorLata,
+              mermas: d.mermas,
+            })),
+          },
+        },
+      });
+
+      // Recalcular cierres afectados
+      for (const cierreId of afectados) {
+        await recalcularCierre(tx, cierreId);
+      }
+
+      if (cambios.length > 0) {
+        await registrarAuditoria(tx, {
+          entidad: "CocheProduccion",
+          entidadId: cocheId,
+          accion: "EDITAR",
+          cambios,
+          userId,
+        });
+      }
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.startsWith("PERMISO:")) return { ok: false, mensaje: msg.replace("PERMISO: ", "") };
+    return { ok: false, mensaje: "No se pudo guardar la edición del coche." };
+  }
+
+  revalidatePath("/produccion");
+  revalidatePath("/caja");
+  revalidatePath("/dashboard");
+
+  const aviso = cierresAfectadosIds.length > 0 ? "&recalculado=1" : "";
+  redirect(`/produccion?editado=1${aviso}`);
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { productosConPrecio } from "@/lib/catalogo";
 import { CocheForm } from "../CocheForm";
@@ -6,6 +7,9 @@ import { CocheForm } from "../CocheForm";
 export const dynamic = "force-dynamic";
 
 export default async function NuevoCochePage() {
+  const session = await auth();
+  const esAdmin = session?.user?.rol === "ADMIN";
+
   const [productos, sucursales] = await Promise.all([
     productosConPrecio(true),
     prisma.sucursal.findMany({ orderBy: { nombre: "asc" } }),
@@ -55,11 +59,12 @@ export default async function NuevoCochePage() {
         productos={productos.map((p) => ({
           id: p.id,
           nombre: p.nombre,
-          precio: p.precioVigente,
+          precio: esAdmin ? p.precioVigente : null,
         }))}
         sucursales={sucursales}
         hoy={hoy}
         ahora={ahora}
+        mostrarIngreso={esAdmin}
       />
     </div>
   );

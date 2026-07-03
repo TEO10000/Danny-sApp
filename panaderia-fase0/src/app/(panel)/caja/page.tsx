@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { etiquetaTurno } from "@/lib/turnos";
 
@@ -26,8 +27,11 @@ type CierreListado = {
 export default async function CajaPage({
   searchParams,
 }: {
-  searchParams: { guardado?: string };
+  searchParams: { guardado?: string; editado?: string; eliminado?: string };
 }) {
+  const session = await auth();
+  const esAdmin = session?.user?.rol === "ADMIN";
+
   const cierres = (await prisma.cierreTurno.findMany({
     orderBy: [{ fecha: "desc" }, { tipoTurno: "desc" }],
     take: 30,
@@ -36,6 +40,23 @@ export default async function CajaPage({
       empleada: { select: { nombre: true } },
     },
   })) as CierreListado[];
+
+  // Cierres que fueron editados (tienen AuditLog con accion EDITAR)
+  const cierresEditados = esAdmin
+    ? new Set(
+        (
+          await prisma.auditLog.findMany({
+            where: {
+              entidad: "CierreTurno",
+              accion: "EDITAR",
+              entidadId: { in: cierres.map((c) => c.id) },
+            },
+            select: { entidadId: true },
+            distinct: ["entidadId"],
+          })
+        ).map((a) => a.entidadId)
+      )
+    : new Set<string>();
 
   return (
     <div className="space-y-5">
@@ -55,11 +76,18 @@ export default async function CajaPage({
       </div>
 
       {searchParams.guardado && (
-        <p
-          role="status"
-          className="rounded-lg bg-cuadre-ok/10 px-3 py-2 text-sm font-medium text-cuadre-ok"
-        >
+        <p role="status" className="rounded-lg bg-cuadre-ok/10 px-3 py-2 text-sm font-medium text-cuadre-ok">
           Turno cerrado y ventas calculadas.
+        </p>
+      )}
+      {searchParams.editado && (
+        <p role="status" className="rounded-lg bg-cuadre-ok/10 px-3 py-2 text-sm font-medium text-cuadre-ok">
+          Cierre actualizado y ventas recalculadas.
+        </p>
+      )}
+      {searchParams.eliminado && (
+        <p role="status" className="rounded-lg bg-masa-200 px-3 py-2 text-sm font-medium text-corteza-600">
+          Cierre eliminado. Las facturas de caja volvieron a Pendiente.
         </p>
       )}
 
@@ -76,29 +104,45 @@ export default async function CajaPage({
             const cuadra = Math.abs(descuadre) < 0.005;
             return (
               <li key={c.id} className="rounded-panel border border-masa-200 bg-white p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="font-bold text-corteza-900">
-                    {fmtFecha.format(c.fecha)} · {c.sucursal.nombre} ·{" "}
-                    {etiquetaTurno(c.tipoTurno)}
-                  </p>
-                  <p
-                    className={`font-bold ${cuadra ? "text-cuadre-ok" : "text-cuadre-mal"}`}
-                  >
-                    {cuadra
-                      ? "Cuadra"
-                      : `${descuadre < 0 ? "Falta" : "Sobra"} $${Math.abs(descuadre).toFixed(2)}`}
-                  </p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-bold text-corteza-900">
+                        {fmtFecha.format(c.fecha)} · {c.sucursal.nombre} ·{" "}
+                        {etiquetaTurno(c.tipoTurno)}
+                      </p>
+                      {cierresEditados.has(c.id) && (
+                        <span className="rounded-full bg-masa-200 px-2 py-0.5 text-xs font-semibold text-corteza-500">
+                          Corregido
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm text-corteza-600">
+                      Ventas ${(Number(c.efectivoEsperado) - 40).toFixed(2)} · contado $
+                      {Number(c.efectivoContado).toFixed(2)} (debía haber $
+                      {Number(c.efectivoEsperado).toFixed(2)})
+                    </p>
+                    <p className="mt-1 text-sm text-corteza-400">
+                      {c.empleada.nombre}
+                      {c.notas ? ` · "${c.notas}"` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <p className={`font-bold ${cuadra ? "text-cuadre-ok" : "text-cuadre-mal"}`}>
+                      {cuadra
+                        ? "Cuadra"
+                        : `${descuadre < 0 ? "Falta" : "Sobra"} $${Math.abs(descuadre).toFixed(2)}`}
+                    </p>
+                    {esAdmin && (
+                      <Link
+                        href={`/caja/${c.id}/editar`}
+                        className="rounded-lg border border-masa-200 px-3 py-1.5 text-sm font-semibold text-corteza-600 hover:bg-masa-100"
+                      >
+                        Editar
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <p className="mt-1 text-sm text-corteza-600">
-                  Ventas $
-                  {(Number(c.efectivoEsperado) - 40).toFixed(2)} · contado $
-                  {Number(c.efectivoContado).toFixed(2)} (debía haber $
-                  {Number(c.efectivoEsperado).toFixed(2)})
-                </p>
-                <p className="mt-1 text-sm text-corteza-400">
-                  {c.empleada.nombre}
-                  {c.notas ? ` · "${c.notas}"` : ""}
-                </p>
               </li>
             );
           })}

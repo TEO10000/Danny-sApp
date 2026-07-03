@@ -2,7 +2,7 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { dinero } from "@/lib/catalogo";
-import { pagarFacturaJefe, anularFactura } from "./actions";
+import { pagarFacturaJefe, anularFactura, revertirPagoFactura } from "./actions";
 import { FiltroSucursal } from "./FiltroSucursal";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +43,7 @@ type FacturaListada = {
   montoTotal: unknown;
   estado: EstadoBadge;
   origenPago: string | null;
+  registradaPorId: string;
   proveedor: { nombre: string };
   sucursal: { nombre: string };
   registradaPor: { nombre: string };
@@ -62,11 +63,14 @@ export default async function FacturasPage({
     guardado?: string;
     pagado?: string;
     anulada?: string;
+    editada?: string;
+    revertida?: string;
     error?: string;
   };
 }) {
   const session = await auth();
   const esAdmin = session?.user?.rol === "ADMIN";
+  const userId = session?.user?.id ?? "";
 
   const filtroEstado = searchParams.estado ?? "PENDIENTE";
   const filtroSucursal = searchParams.sucursal ?? "";
@@ -141,9 +145,21 @@ export default async function FacturasPage({
           Factura anulada.
         </p>
       )}
-      {searchParams.error === "permiso" && (
+      {searchParams.editada && (
+        <p role="status" className="rounded-lg bg-cuadre-ok/10 px-3 py-2 text-sm font-medium text-cuadre-ok">
+          Factura actualizada correctamente.
+        </p>
+      )}
+      {searchParams.revertida && (
+        <p role="status" className="rounded-lg bg-masa-200 px-3 py-2 text-sm font-medium text-corteza-600">
+          Pago revertido. La factura volvió a Pendiente.
+        </p>
+      )}
+      {(searchParams.error === "permiso" || searchParams.error === "anulada") && (
         <p role="alert" className="rounded-lg bg-cuadre-mal/10 px-3 py-2 text-sm font-medium text-cuadre-mal">
-          No tienes permiso para realizar esa acción.
+          {searchParams.error === "anulada"
+            ? "Las facturas anuladas no se pueden editar."
+            : "No tienes permiso para realizar esa acción."}
         </p>
       )}
 
@@ -213,26 +229,51 @@ export default async function FacturasPage({
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <p className="text-lg font-bold text-corteza-900">{dinero(Number(f.montoTotal))}</p>
-                  {esAdmin && f.estado === "PENDIENTE" && (
-                    <div className="flex gap-2">
-                      <form action={pagarFacturaJefe}>
-                        <input type="hidden" name="facturaId" value={f.id} />
-                        <button
-                          type="submit"
-                          className="rounded-lg bg-cuadre-ok/10 px-3 py-1.5 text-sm font-semibold text-cuadre-ok hover:bg-cuadre-ok/20"
+
+                  {/* Botones por estado y rol */}
+                  {f.estado !== "ANULADA" && (
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      {/* Editar: PENDIENTE → quien registró o ADMIN; PAGADA → solo ADMIN */}
+                      {(f.estado === "PENDIENTE"
+                        ? (esAdmin || f.registradaPorId === userId)
+                        : esAdmin) && (
+                        <Link
+                          href={`/facturas/${f.id}/editar`}
+                          className="rounded-lg border border-masa-200 px-3 py-1.5 text-sm font-semibold text-corteza-600 hover:bg-masa-100"
                         >
-                          Pagar (jefe)
-                        </button>
-                      </form>
-                      <form action={anularFactura}>
-                        <input type="hidden" name="facturaId" value={f.id} />
-                        <button
-                          type="submit"
-                          className="rounded-lg bg-masa-100 px-3 py-1.5 text-sm font-semibold text-corteza-400 hover:bg-masa-200"
-                        >
-                          Anular
-                        </button>
-                      </form>
+                          Editar
+                        </Link>
+                      )}
+
+                      {/* Pagar (jefe): PENDIENTE, solo ADMIN */}
+                      {esAdmin && f.estado === "PENDIENTE" && (
+                        <form action={pagarFacturaJefe}>
+                          <input type="hidden" name="facturaId" value={f.id} />
+                          <button type="submit" className="rounded-lg bg-cuadre-ok/10 px-3 py-1.5 text-sm font-semibold text-cuadre-ok hover:bg-cuadre-ok/20">
+                            Pagar (jefe)
+                          </button>
+                        </form>
+                      )}
+
+                      {/* Revertir pago: PAGADA, solo ADMIN */}
+                      {esAdmin && f.estado === "PAGADA" && (
+                        <form action={revertirPagoFactura}>
+                          <input type="hidden" name="facturaId" value={f.id} />
+                          <button type="submit" className="rounded-lg border border-masa-200 px-3 py-1.5 text-sm font-semibold text-corteza-600 hover:bg-masa-100">
+                            Revertir pago
+                          </button>
+                        </form>
+                      )}
+
+                      {/* Anular: PENDIENTE o PAGADA, solo ADMIN */}
+                      {esAdmin && (
+                        <form action={anularFactura}>
+                          <input type="hidden" name="facturaId" value={f.id} />
+                          <button type="submit" className="rounded-lg bg-masa-100 px-3 py-1.5 text-sm font-semibold text-corteza-400 hover:bg-masa-200">
+                            Anular
+                          </button>
+                        </form>
+                      )}
                     </div>
                   )}
                 </div>
