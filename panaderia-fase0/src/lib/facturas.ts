@@ -1,5 +1,17 @@
 import { prisma } from "@/lib/prisma";
 
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+export function calcularTotalesFactura(
+  lineas: Array<{ costoTotal: number }>,
+  aplicaIva: boolean
+): { subtotal: number; iva: number; montoTotal: number } {
+  const subtotal = r2(lineas.reduce((s, l) => s + l.costoTotal, 0));
+  const iva = aplicaIva ? r2(subtotal * 0.15) : 0;
+  const montoTotal = r2(subtotal + iva);
+  return { subtotal, iva, montoTotal };
+}
+
 export type InsumoConUltimoCosto = {
   id: string;
   nombre: string;

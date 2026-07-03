@@ -24,6 +24,10 @@ const esquemaIA = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable(),
+  subtotal: z.number().nullable().optional(),
+  iva: z.number().nullable().optional(),
+  total: z.number().nullable().optional(),
+  aplicaIva: z.boolean().optional(),
   lineas: z.array(
     z.object({
       descripcion: z.string(),
@@ -43,6 +47,10 @@ Responde ÚNICAMENTE con este JSON:
   "proveedorNombre": "nombre del vendedor/proveedor o null",
   "numero": "número de la factura o null",
   "fecha": "YYYY-MM-DD o null",
+  "subtotal": número o null,
+  "iva": número o null,
+  "total": número o null,
+  "aplicaIva": true o false,
   "lineas": [
     {
       "descripcion": "nombre del producto/insumo",
@@ -57,6 +65,9 @@ Reglas:
 - La fecha DEBE estar en formato YYYY-MM-DD. Si no la encuentras, usa null.
 - Los números deben ser solo dígitos (sin símbolos de moneda ni separadores de miles).
 - costoTotal es el precio total de esa línea (cantidad × precio unitario).
+- Si la factura imprime subtotal, IVA y total, extráelos tal cual en los campos subtotal/iva/total.
+- En Ecuador el IVA vigente es 15%. Muchas facturas de insumos de panadería son tarifa 0%; en ese caso aplicaIva es false e iva es 0.
+- aplicaIva es true solo si la factura indica explícitamente un IVA mayor a 0.
 - Si no puedes leer algún campo, usa null.`;
 
 // Recibe multipart/form-data con campo "archivo" (imagen JPG/PNG/WEBP/GIF o PDF)
@@ -153,6 +164,28 @@ export async function POST(request: Request) {
     );
   }
 
+  // ── Validar coherencia del desglose IVA extraído ─────────────────────────
+  let aplicaIvaExtractado = extractado.aplicaIva ?? false;
+  if (
+    extractado.subtotal != null &&
+    extractado.iva != null &&
+    extractado.total != null
+  ) {
+    const diferencia = Math.abs(extractado.subtotal + extractado.iva - extractado.total);
+    if (diferencia > 0.02) {
+      // El desglose no cuadra → descartar y dejar que el usuario lo marque a mano
+      aplicaIvaExtractado = false;
+    }
+  }
+
+  // ── Detectar descuadre entre subtotal impreso y suma de líneas ────────────
+  let advertenciaDescuadre: string | undefined;
+  const sumaLineas = extractado.lineas.reduce((s, l) => s + l.costoTotal, 0);
+  if (extractado.subtotal != null && Math.abs(sumaLineas - extractado.subtotal) > 0.02) {
+    advertenciaDescuadre =
+      "La suma de líneas no cuadra con el subtotal impreso — revisa cantidades y precios.";
+  }
+
   // ── Mapear a entidades existentes ─────────────────────────────────────────
   const [proveedores, insumos] = await Promise.all([
     prisma.proveedor.findMany({
@@ -221,6 +254,8 @@ export async function POST(request: Request) {
     proveedorNuevo,
     fecha: extractado.fecha ?? undefined,
     numero: extractado.numero ?? undefined,
+    aplicaIva: aplicaIvaExtractado,
+    advertenciaDescuadre,
     lineas,
     crudo: extractado,
   });

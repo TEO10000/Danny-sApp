@@ -41,6 +41,9 @@ type FacturaListada = {
   numero: string | null;
   fecha: Date;
   montoTotal: unknown;
+  aplicaIva: boolean;
+  subtotal: unknown;
+  iva: unknown;
   estado: EstadoBadge;
   origenPago: string | null;
   registradaPorId: string;
@@ -228,7 +231,14 @@ export default async function FacturasPage({
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <p className="text-lg font-bold text-corteza-900">{dinero(Number(f.montoTotal))}</p>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-corteza-900">{dinero(Number(f.montoTotal))}</p>
+                    {f.aplicaIva && (
+                      <p className="text-xs text-corteza-400">
+                        Subtotal {dinero(Number(f.subtotal))} <span className="font-semibold text-horno-600">c/IVA</span>
+                      </p>
+                    )}
+                  </div>
 
                   {/* Botones por estado y rol */}
                   {f.estado !== "ANULADA" && (

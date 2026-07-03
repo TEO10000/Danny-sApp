@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { recalcularCierre } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { calcularTotalesFactura } from "@/lib/facturas";
 
 export type EstadoFactura = { ok: boolean; mensaje: string } | null;
 
@@ -43,6 +44,7 @@ const crearFacturaSchema = z
     fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha no es válida"),
     numero: z.string().nullable().optional(),
     lineas: z.array(lineaSchema).min(1, "Agrega al menos una línea"),
+    aplicaIva: z.coerce.boolean().default(false),
     // Campos opcionales para el flujo de escaneo IA (compatibles con registro manual)
     origenRegistro: z.enum(["MANUAL", "ESCANEO_IA"]).optional(),
     imagenUrl: z.string().nullable().optional(),
@@ -95,7 +97,6 @@ export async function crearFactura(
       }
 
       // Resolver o crear insumos y construir líneas
-      let montoTotal = 0;
       const compras: Array<{
         insumoId: string;
         cantidad: number;
@@ -117,10 +118,10 @@ export async function crearFactura(
           insumoId = ins.id;
         }
         const costoUnitario = Math.round((linea.costoTotal / linea.cantidad) * 10000) / 10000;
-        montoTotal += linea.costoTotal;
         compras.push({ insumoId, cantidad: linea.cantidad, costoTotal: linea.costoTotal, costoUnitario });
       }
-      montoTotal = Math.round(montoTotal * 100) / 100;
+
+      const { subtotal, iva, montoTotal } = calcularTotalesFactura(compras, d.aplicaIva);
 
       await tx.facturaProveedor.create({
         data: {
@@ -129,6 +130,9 @@ export async function crearFactura(
           numero: d.numero ?? null,
           fecha: new Date(d.fecha + "T00:00:00-05:00"),
           montoTotal,
+          aplicaIva: d.aplicaIva,
+          subtotal,
+          iva,
           estado: "PENDIENTE",
           origenRegistro: d.origenRegistro ?? "MANUAL",
           imagenUrl: d.imagenUrl ?? null,
@@ -234,6 +238,7 @@ const editarFacturaSchema = z.object({
     .trim()
     .transform((v) => (v === "" ? null : v))
     .nullable(),
+  aplicaIva: z.coerce.boolean().default(false),
   lineas: z.array(
     z.object({
       insumoId: z.string().min(1, "Elige el insumo."),
@@ -277,15 +282,13 @@ export async function editarFactura(
         throw new Error("Solo puedes editar facturas que registraste tú.");
       }
 
-      // Recalcular montoTotal
-      let montoTotal = 0;
+      // Recalcular totales con IVA
       const comprasNuevas: Array<{ insumoId: string; cantidad: number; costoTotal: number; costoUnitario: number }> = [];
       for (const linea of d.lineas) {
         const costoUnitario = Math.round((linea.costoTotal / linea.cantidad) * 10000) / 10000;
-        montoTotal += linea.costoTotal;
         comprasNuevas.push({ insumoId: linea.insumoId, cantidad: linea.cantidad, costoTotal: linea.costoTotal, costoUnitario });
       }
-      montoTotal = Math.round(montoTotal * 100) / 100;
+      const { subtotal, iva, montoTotal } = calcularTotalesFactura(comprasNuevas, d.aplicaIva);
 
       // Cambios para auditoría
       const cambios: Array<{ campo: string; valorAnterior: string; valorNuevo: string }> = [];
@@ -294,6 +297,7 @@ export async function editarFactura(
       const fechaAnterior = actual.fecha.toISOString().slice(0, 10);
       if (fechaAnterior !== d.fecha) cambios.push({ campo: "fecha", valorAnterior: fechaAnterior, valorNuevo: d.fecha });
       if ((actual.numero ?? null) !== d.numero) cambios.push({ campo: "numero", valorAnterior: actual.numero ?? "(vacío)", valorNuevo: d.numero ?? "(vacío)" });
+      if (actual.aplicaIva !== d.aplicaIva) cambios.push({ campo: "aplicaIva", valorAnterior: String(actual.aplicaIva), valorNuevo: String(d.aplicaIva) });
       if (Number(actual.montoTotal) !== montoTotal) cambios.push({ campo: "montoTotal", valorAnterior: String(Number(actual.montoTotal)), valorNuevo: String(montoTotal) });
 
       // Reemplazar compras
@@ -306,6 +310,9 @@ export async function editarFactura(
           fecha: new Date(d.fecha + "T00:00:00-05:00"),
           numero: d.numero,
           montoTotal,
+          aplicaIva: d.aplicaIva,
+          subtotal,
+          iva,
           compras: { create: comprasNuevas },
         },
       });

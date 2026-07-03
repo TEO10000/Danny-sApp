@@ -58,6 +58,7 @@ export default async function EditarFacturaPage({ params }: { params: { id: stri
         initialSucursalId={factura.sucursalId}
         initialFecha={factura.fecha.toISOString().slice(0, 10)}
         initialNumero={factura.numero ?? ""}
+        initialAplicaIva={factura.aplicaIva}
         initialLineas={factura.compras.map((c) => ({
           insumoId: c.insumoId,
           insumoNombre: c.insumo.nombre,

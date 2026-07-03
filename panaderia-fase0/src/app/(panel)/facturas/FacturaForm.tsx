@@ -25,6 +25,8 @@ export type ValoresInicialesFactura = {
   proveedorNuevo?: { nombre: string; contacto?: string | null; telefono?: string | null };
   numero?: string | null;
   fecha?: string;
+  aplicaIva?: boolean;
+  advertenciaDescuadre?: string;
   lineas?: Array<{
     insumoId?: string;
     insumoNuevo?: { nombre: string; unidadMedida: string };
@@ -113,6 +115,7 @@ export function FacturaForm({
   const [sucursalId, setSucursalId] = useState(sucursales[0]?.id ?? "");
   const [fecha, setFecha] = useState(valoresIniciales?.fecha ?? hoy);
   const [numero, setNumero] = useState(valoresIniciales?.numero ?? "");
+  const [aplicaIva, setAplicaIva] = useState(valoresIniciales?.aplicaIva ?? false);
 
   // Líneas de compra
   const lineasInicio = lineasDesdeIniciales(valoresIniciales?.lineas);
@@ -158,15 +161,18 @@ export function FacturaForm({
     return insumos.find((i) => i.id === insumoId)?.ultimoCostoUnitario ?? null;
   };
 
-  // Total de la factura en vivo
-  const total = useMemo(
-    () =>
+  // Totales en vivo (misma lógica que el servidor)
+  const { subtotalVivo, ivaVivo, totalVivo } = useMemo(() => {
+    const subtotalVivo = Math.round(
       lineas.reduce((sum, l) => {
         const c = parseFloat(l.costoTotal);
         return sum + (isNaN(c) ? 0 : c);
-      }, 0),
-    [lineas]
-  );
+      }, 0) * 100
+    ) / 100;
+    const ivaVivo = aplicaIva ? Math.round(subtotalVivo * 0.15 * 100) / 100 : 0;
+    const totalVivo = Math.round((subtotalVivo + ivaVivo) * 100) / 100;
+    return { subtotalVivo, ivaVivo, totalVivo };
+  }, [lineas, aplicaIva]);
 
   // Validación para habilitar el botón
   const puedeGuardar = useMemo(() => {
@@ -185,6 +191,9 @@ export function FacturaForm({
     return true;
   }, [sucursalId, fecha, proveedorId, provNombre, lineas]);
 
+  // Advertencia de descuadre del escaneo IA
+  const advertenciaDescuadre = valoresIniciales?.advertenciaDescuadre;
+
   // Serialización del payload
   const payload = JSON.stringify({
     proveedorId: proveedorId !== "__nuevo__" ? proveedorId : undefined,
@@ -199,6 +208,7 @@ export function FacturaForm({
     sucursalId,
     fecha,
     numero: numero.trim() || null,
+    aplicaIva,
     lineas: lineas.map((l) => ({
       insumoId: l.insumoId !== "__nuevo__" ? l.insumoId || undefined : undefined,
       insumoNuevo:
@@ -221,6 +231,13 @@ export function FacturaForm({
         <div className="rounded-lg border border-horno-400 bg-horno-500/10 px-4 py-3 text-sm text-horno-700">
           Datos pre-llenados por la IA. Verifica el monto de cada línea, elige la sucursal
           correcta y corrige cualquier campo antes de guardar.
+        </div>
+      )}
+
+      {/* Advertencia de descuadre del escaneo IA */}
+      {advertenciaDescuadre && (
+        <div role="alert" className="rounded-lg border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+          {advertenciaDescuadre}
         </div>
       )}
 
@@ -329,6 +346,19 @@ export function FacturaForm({
             />
           </div>
         </div>
+
+        {/* Checkbox IVA */}
+        <label className="mt-4 flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-masa-200 bg-masa-50 px-4 py-2.5 select-none">
+          <input
+            type="checkbox"
+            checked={aplicaIva}
+            onChange={(e) => setAplicaIva(e.target.checked)}
+            className="h-5 w-5 rounded accent-horno-500"
+          />
+          <span className="text-sm font-semibold text-corteza-800">
+            Factura con IVA (15%)
+          </span>
+        </label>
       </section>
 
       {/* Líneas de insumos */}
@@ -471,9 +501,21 @@ export function FacturaForm({
         </ul>
 
         {lineas.length > 0 && (
-          <div className="flex items-center justify-end gap-2 border-t border-masa-200 bg-masa-50 px-4 py-3">
-            <span className="text-sm text-corteza-600">Total de la factura:</span>
-            <span className="text-lg font-bold text-corteza-900">{dinero(total)}</span>
+          <div className="border-t border-masa-200 bg-masa-50 px-4 py-3 space-y-1">
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-sm text-corteza-600">Subtotal:</span>
+              <span className="text-base font-semibold text-corteza-900">{dinero(subtotalVivo)}</span>
+            </div>
+            {aplicaIva && (
+              <div className="flex items-center justify-end gap-2">
+                <span className="text-sm text-corteza-600">IVA 15%:</span>
+                <span className="text-base font-semibold text-corteza-900">{dinero(ivaVivo)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 border-t border-masa-200 pt-1">
+              <span className="text-sm font-semibold text-corteza-700">Total:</span>
+              <span className="text-lg font-bold text-corteza-900">{dinero(totalVivo)}</span>
+            </div>
           </div>
         )}
       </section>

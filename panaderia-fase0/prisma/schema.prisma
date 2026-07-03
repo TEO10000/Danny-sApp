@@ -149,7 +149,10 @@ model FacturaProveedor {
   sucursalId     String
   numero         String?
   fecha          DateTime
-  montoTotal     Decimal               @db.Decimal(10, 2)
+  montoTotal     Decimal               @db.Decimal(10, 2) // montoTotal = subtotal + iva (total real pagable)
+  aplicaIva      Boolean               @default(false)
+  subtotal       Decimal               @default(0) @db.Decimal(10, 2)
+  iva            Decimal               @default(0) @db.Decimal(10, 2)
   estado         EstadoFactura         @default(PENDIENTE)
   origenRegistro OrigenRegistroFactura @default(MANUAL)
   imagenUrl      String? // respaldo de la factura escaneada (Vercel Blob)

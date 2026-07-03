@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import Link from "next/link";
 import { editarFactura, type EstadoFactura } from "../../actions";
@@ -28,6 +28,7 @@ export function FormEditarFactura({
   initialSucursalId,
   initialFecha,
   initialNumero,
+  initialAplicaIva,
   initialLineas,
   proveedores,
   sucursales,
@@ -38,6 +39,7 @@ export function FormEditarFactura({
   initialSucursalId: string;
   initialFecha: string;
   initialNumero: string;
+  initialAplicaIva: boolean;
   initialLineas: LineaInicial[];
   proveedores: Proveedor[];
   sucursales: Sucursal[];
@@ -46,13 +48,19 @@ export function FormEditarFactura({
   const [lineas, setLineas] = useState(
     initialLineas.map((l, i) => ({ clave: i, ...l }))
   );
+  const [aplicaIva, setAplicaIva] = useState(initialAplicaIva);
   const [estado, accion] = useFormState<EstadoFactura, FormData>(editarFactura, null);
 
   const editarLinea = (clave: number, campo: string, valor: string | number) => {
     setLineas((ls) => ls.map((l) => (l.clave === clave ? { ...l, [campo]: valor } : l)));
   };
 
-  const montoTotal = lineas.reduce((s, l) => s + (Number(l.costoTotal) || 0), 0);
+  const { subtotalVivo, ivaVivo, totalVivo } = useMemo(() => {
+    const subtotalVivo = Math.round(lineas.reduce((s, l) => s + (Number(l.costoTotal) || 0), 0) * 100) / 100;
+    const ivaVivo = aplicaIva ? Math.round(subtotalVivo * 0.15 * 100) / 100 : 0;
+    const totalVivo = Math.round((subtotalVivo + ivaVivo) * 100) / 100;
+    return { subtotalVivo, ivaVivo, totalVivo };
+  }, [lineas, aplicaIva]);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     const payload = {
@@ -61,6 +69,7 @@ export function FormEditarFactura({
       sucursalId: (e.currentTarget.elements.namedItem("sucursalId") as HTMLSelectElement)?.value,
       fecha: (e.currentTarget.elements.namedItem("fecha") as HTMLInputElement)?.value,
       numero: (e.currentTarget.elements.namedItem("numero") as HTMLInputElement)?.value ?? "",
+      aplicaIva,
       lineas: lineas.map((l) => ({
         insumoId: l.insumoId,
         cantidad: Number(l.cantidad),
@@ -96,6 +105,17 @@ export function FormEditarFactura({
             N.° de factura <span className="font-normal text-corteza-400">(opcional)</span>
           </label>
           <input id="numero" name="numero" defaultValue={initialNumero} className={`mt-1.5 ${inputCls}`} placeholder="001-001-000000123" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-masa-200 bg-masa-50 px-4 py-2.5 select-none">
+            <input
+              type="checkbox"
+              checked={aplicaIva}
+              onChange={(e) => setAplicaIva(e.target.checked)}
+              className="h-5 w-5 rounded accent-horno-500"
+            />
+            <span className="text-sm font-semibold text-corteza-800">Factura con IVA (15%)</span>
+          </label>
         </div>
       </div>
 
@@ -135,14 +155,21 @@ export function FormEditarFactura({
         </button>
       </section>
 
-      <div className="flex items-center justify-between rounded-panel border border-masa-200 bg-white p-4">
-        <div className="flex gap-3">
-          <BotonGuardar />
-          <Link href="/facturas" className="rounded-lg border border-masa-200 px-4 py-2.5 text-sm font-semibold text-corteza-600 hover:bg-masa-100">
-            Cancelar
-          </Link>
+      <div className="rounded-panel border border-masa-200 bg-white p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex gap-3">
+            <BotonGuardar />
+            <Link href="/facturas" className="rounded-lg border border-masa-200 px-4 py-2.5 text-sm font-semibold text-corteza-600 hover:bg-masa-100">
+              Cancelar
+            </Link>
+          </div>
+          <div className="text-right space-y-0.5">
+            {aplicaIva && (
+              <p className="text-xs text-corteza-500">Subtotal: ${subtotalVivo.toFixed(2)} + IVA: ${ivaVivo.toFixed(2)}</p>
+            )}
+            <p className="font-bold text-corteza-900">Total: ${totalVivo.toFixed(2)}</p>
+          </div>
         </div>
-        <p className="font-bold text-corteza-900">Total: ${montoTotal.toFixed(2)}</p>
       </div>
 
       {estado && !estado.ok && (
