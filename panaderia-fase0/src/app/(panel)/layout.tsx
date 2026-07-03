@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { Sidebar } from "@/components/Sidebar";
 
 const NAV = [
@@ -8,6 +9,7 @@ const NAV = [
   { href: "/caja",         etiqueta: "Caja",         icono: "caja",         roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { href: "/facturas",     etiqueta: "Facturas",     icono: "facturas",     roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { href: "/catalogo",     etiqueta: "Catálogo",     icono: "catalogo",     roles: ["ADMIN"] },
+  { href: "/usuarios",     etiqueta: "Usuarios",     icono: "usuarios",     roles: ["ADMIN"] },
   { href: "/precios",      etiqueta: "Precios",      icono: "precios",      roles: ["PANADERO", "ATENCION_CLIENTE"] },
   { href: "/campanias",    etiqueta: "Campañas",     icono: "campanias",    roles: ["ADMIN"] },
   { href: "/plan-semanal", etiqueta: "Plan Semanal", icono: "plan-semanal", roles: ["ADMIN", "PANADERO"] },
@@ -21,6 +23,14 @@ export default async function PanelLayout({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
+
+  // Expulsar usuarios desactivados con sesión JWT viva (RF-P07)
+  const usuarioDb = await prisma.user.findUnique({
+    where: { id: session.user.id! },
+    select: { activo: true },
+  });
+  if (!usuarioDb || !usuarioDb.activo) redirect("/api/salir");
+
   const rol = session.user.rol ?? "";
   const enlaces = NAV.filter((n) =>
     (n.roles as readonly string[]).includes(rol)

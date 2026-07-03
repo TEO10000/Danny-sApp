@@ -72,12 +72,13 @@ model User {
   activo       Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  cochesProduccion CocheProduccion[]
-  cierresTurno     CierreTurno[]
+  cochesProduccion    CocheProduccion[]
+  cierresTurno        CierreTurno[]
   facturasRegistradas FacturaProveedor[] @relation("FacturaRegistradaPor")
   facturasPagadas     FacturaProveedor[] @relation("FacturaPagadaPor")
-  planesAprobados  PlanSemanal[]
-  consultasIA      ConsultaIA[]
+  planesAprobados     PlanSemanal[]
+  consultasIA         ConsultaIA[]
+  auditLogs           AuditLog[]
 }
 
 model Sucursal {
@@ -317,4 +318,22 @@ model ConsultaIA {
   fecha     DateTime       @default(now())
 
   user User @relation(fields: [userId], references: [id])
+}
+
+// ===================== Auditoría =====================
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  entidad       String   // "User" | "CierreTurno" | "CocheProduccion" | "FacturaProveedor" ...
+  entidadId     String
+  accion        String   // "CREAR" | "EDITAR" | "DESACTIVAR" | "ACTIVAR" | "RESET_PASSWORD" ...
+  campo         String?  // nombre del campo cambiado (null en CREAR)
+  valorAnterior String?  // serializado a string (null en CREAR)
+  valorNuevo    String?
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  fecha         DateTime @default(now())
+
+  @@index([entidad, entidadId])
+  @@index([fecha])
 }
