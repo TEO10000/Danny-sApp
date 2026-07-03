@@ -5,6 +5,7 @@ import { useFormState, useFormStatus } from "react-dom";
 import { crearFactura, type EstadoFactura } from "./actions";
 import { dinero } from "@/lib/catalogo";
 import type { InsumoConUltimoCosto } from "@/lib/facturas";
+import { SelectorBuscador } from "@/components/SelectorBuscador";
 
 type Proveedor = { id: string; nombre: string };
 type Sucursal = { id: string; nombre: string };
@@ -227,23 +228,20 @@ export function FacturaForm({
       <section className="rounded-panel border border-masa-200 bg-white p-5 space-y-4">
         <h3 className="font-bold text-corteza-900">Proveedor</h3>
         <div>
-          <label htmlFor="proveedor" className={labelCls}>
-            Proveedor
-          </label>
-          <select
-            id="proveedor"
-            value={proveedorId}
-            onChange={(e) => setProveedorId(e.target.value)}
-            className={`mt-1.5 ${inputCls}`}
-          >
-            <option value="">-- Elige un proveedor --</option>
-            {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-            <option value="__nuevo__">+ Proveedor nuevo…</option>
-          </select>
+          <label className={labelCls}>Proveedor</label>
+          <div className="mt-1.5">
+            <SelectorBuscador
+              name="proveedor-sel"
+              opciones={[
+                ...proveedores.map((p) => ({ id: p.id, etiqueta: p.nombre })),
+                { id: "__nuevo__", etiqueta: "+ Proveedor nuevo…" },
+              ]}
+              valorInicial={initProveedorId}
+              placeholder="Buscar proveedor…"
+              onSeleccion={setProveedorId}
+              requerido
+            />
+          </div>
         </div>
 
         {proveedorId === "__nuevo__" && (
@@ -361,25 +359,32 @@ export function FacturaForm({
                 <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                   <div>
                     <label className={labelCls}>Insumo</label>
-                    <select
-                      value={l.insumoId}
-                      onChange={(e) =>
-                        actualizarLinea(l.uid, {
-                          insumoId: e.target.value,
-                          insumoNuevoNombre: "",
-                          insumoNuevoUnidad: "",
-                        })
-                      }
-                      className={`mt-1 ${inputCls}`}
-                    >
-                      <option value="">-- Elige un insumo --</option>
-                      {insumos.map((i) => (
-                        <option key={i.id} value={i.id}>
-                          {i.nombre} ({i.unidadMedida})
-                        </option>
-                      ))}
-                      <option value="__nuevo__">+ Insumo nuevo…</option>
-                    </select>
+                    <div className="mt-1">
+                      <SelectorBuscador
+                        name={`insumo-sel-${l.uid}`}
+                        opciones={[
+                          ...insumos.map((i) => ({
+                            id: i.id,
+                            etiqueta: `${i.nombre} (${i.unidadMedida})`,
+                            detalle:
+                              i.ultimoCostoUnitario != null
+                                ? `Último: ${dinero(i.ultimoCostoUnitario)}`
+                                : undefined,
+                          })),
+                          { id: "__nuevo__", etiqueta: "+ Insumo nuevo…" },
+                        ]}
+                        valorInicial={l.insumoId}
+                        placeholder="Buscar insumo…"
+                        onSeleccion={(id) =>
+                          actualizarLinea(l.uid, {
+                            insumoId: id,
+                            insumoNuevoNombre: "",
+                            insumoNuevoUnidad: "",
+                          })
+                        }
+                        requerido
+                      />
+                    </div>
                   </div>
                   <div className="flex items-end">
                     <button

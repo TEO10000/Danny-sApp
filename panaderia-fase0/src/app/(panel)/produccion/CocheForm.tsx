@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { registrarCoche, type EstadoCoche } from "./actions";
+import { SelectorBuscador } from "@/components/SelectorBuscador";
 
 type ProductoOpcion = { id: string; nombre: string; precio: number | null };
 type Sucursal = { id: string; nombre: string };
@@ -169,18 +170,19 @@ export function CocheForm({
               <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div className="col-span-2">
                   <label className="block text-xs font-semibold text-corteza-600">Producto</label>
-                  <select
-                    value={f.productoId}
-                    onChange={(e) => editar(f.clave, "productoId", e.target.value)}
-                    className={`mt-1 ${inputCls}`}
-                  >
-                    <option value="">Elegir…</option>
-                    {productos.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombre}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="mt-1">
+                    <SelectorBuscador
+                      name={`producto-sel-${f.clave}`}
+                      opciones={productos.map((p) => ({
+                        id: p.id,
+                        etiqueta: p.nombre,
+                        detalle: p.precio != null ? `$${p.precio.toFixed(2)}` : undefined,
+                      }))}
+                      valorInicial={f.productoId}
+                      placeholder="Buscar producto…"
+                      onSeleccion={(id) => editar(f.clave, "productoId", id)}
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-corteza-600">Latas</label>
