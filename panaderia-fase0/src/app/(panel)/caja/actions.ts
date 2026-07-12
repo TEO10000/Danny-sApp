@@ -9,6 +9,12 @@ import { Prisma } from "@prisma/client";
 import { datosParaCierre, fechaDia, finDeTurno, strDeFechaDia, type TipoTurno } from "@/lib/turnos";
 import { recalcularCierre, cierreSiguiente } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { normalizarDecimal } from "@/lib/decimales";
+
+const zEfectivo = z.preprocess(
+  (v) => normalizarDecimal(typeof v === "string" || typeof v === "number" ? v : String(v ?? "")) ?? 0,
+  z.number().min(0, "El efectivo contado no puede ser negativo.")
+);
 
 const FONDO_CAJA = 40; // RF-10.1: cada turno abre y cierra con $40
 
@@ -28,9 +34,7 @@ const cierreSchema = z.object({
   sucursalId: z.string().min(1, "Elige la sucursal."),
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha no es válida."),
   tipoTurno: z.enum(["T1_06_14", "T2_14_22"]),
-  efectivoContado: z.coerce
-    .number()
-    .min(0, "El efectivo contado no puede ser negativo."),
+  efectivoContado: zEfectivo,
   notas: z
     .string()
     .trim()
@@ -68,7 +72,7 @@ export async function registrarCierre(
   try {
     facturaIdsCrudos = JSON.parse(String(formData.get("facturaIds") ?? "[]"));
   } catch {
-    facturaIdsCrudos = [];
+    return { ok: false, mensaje: "Los IDs de facturas llegaron corruptos. Recarga e intenta de nuevo." };
   }
 
   let transferenciasData: z.infer<typeof transferenciasSchema>;
@@ -302,7 +306,7 @@ export async function registrarCierre(
 
 const editarCierreSchema = z.object({
   id: z.string().min(1),
-  efectivoContado: z.coerce.number().min(0, "El efectivo contado no puede ser negativo."),
+  efectivoContado: zEfectivo,
   notas: z
     .string()
     .trim()

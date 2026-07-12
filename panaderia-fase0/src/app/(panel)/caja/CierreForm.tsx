@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { registrarCierre, type EstadoCierre } from "./actions";
+import { normalizarDecimal } from "@/lib/decimales";
 
 type Fila = {
   productoId: string;
@@ -17,6 +18,7 @@ type FacturaPendiente = {
   id: string;
   numero: string | null;
   montoTotal: number;
+  fecha: string; // YYYY-MM-DD
   proveedor: { nombre: string };
 };
 
@@ -100,10 +102,10 @@ export function CierreForm({
       const t = transferencias.find((t) => t.id === id);
       return sum + (t?.monto ?? 0);
     }, 0);
-    const totalManuales = manuales.reduce((sum, m) => sum + (parseFloat(m.monto) || 0), 0);
+    const totalManuales = manuales.reduce((sum, m) => sum + (normalizarDecimal(m.monto) ?? 0), 0);
     const totalTransferencias = totalTransConf + totalManuales;
     const esperado = 40 + totalVentas - totalFacturas - totalTransferencias;
-    const cont = parseFloat(contado) || 0;
+    const cont = normalizarDecimal(contado) ?? 0;
     const descuadre = cont - esperado;
     return { totalVentas, totalFacturas, totalTransferencias, esperado, descuadre, porFila, hayNegativos };
   }, [filas, sobrantes, contado, facturasMarcadas, facturasPendientes, transConfirmadas, transferencias, manuales]);
@@ -118,8 +120,8 @@ export function CierreForm({
   const transferenciasJson = JSON.stringify({
     sugeridasConfirmadasIds: [...transConfirmadas],
     manuales: manuales
-      .filter((m) => parseFloat(m.monto) > 0)
-      .map((m) => ({ monto: parseFloat(m.monto), referencia: m.referencia || undefined })),
+      .filter((m) => (normalizarDecimal(m.monto) ?? 0) > 0)
+      .map((m) => ({ monto: normalizarDecimal(m.monto) ?? 0, referencia: m.referencia || undefined })),
   });
 
   function agregarManual() {
@@ -222,8 +224,14 @@ export function CierreForm({
             Marca las facturas que pagaste con el efectivo de este turno. Se descontarán del
             efectivo esperado.
           </p>
-          <ul className="mt-3 divide-y divide-masa-100">
-            {facturasPendientes.map((fp) => (
+          {/* Facturas de días anteriores aún sin pagar */}
+          {facturasPendientes.some((fp) => fp.fecha < fecha) && (
+            <p className="mt-3 text-xs font-semibold text-corteza-500 uppercase tracking-wide">
+              Pendientes de días anteriores
+            </p>
+          )}
+          <ul className="mt-1 divide-y divide-masa-100">
+            {facturasPendientes.filter((fp) => fp.fecha < fecha).map((fp) => (
               <li key={fp.id} className="flex items-center gap-3 py-2.5">
                 <input
                   type="checkbox"
@@ -232,8 +240,7 @@ export function CierreForm({
                   onChange={(e) => {
                     setFacturasMarcadas((prev) => {
                       const next = new Set(prev);
-                      if (e.target.checked) next.add(fp.id);
-                      else next.delete(fp.id);
+                      if (e.target.checked) next.add(fp.id); else next.delete(fp.id);
                       return next;
                     });
                   }}
@@ -242,9 +249,39 @@ export function CierreForm({
                 <label htmlFor={`fp-${fp.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
                   <span>
                     <span className="font-semibold text-corteza-900">{fp.proveedor.nombre}</span>
-                    {fp.numero && (
-                      <span className="ml-1.5 text-corteza-400">#{fp.numero}</span>
-                    )}
+                    {fp.numero && <span className="ml-1.5 text-corteza-400">#{fp.numero}</span>}
+                    <span className="ml-1.5 text-xs text-corteza-400">{fp.fecha}</span>
+                  </span>
+                  <span className="font-bold text-corteza-900">${fp.montoTotal.toFixed(2)}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {facturasPendientes.some((fp) => fp.fecha >= fecha) && (
+            <p className="mt-3 text-xs font-semibold text-corteza-500 uppercase tracking-wide">
+              Registradas hoy
+            </p>
+          )}
+          <ul className="mt-1 divide-y divide-masa-100">
+            {facturasPendientes.filter((fp) => fp.fecha >= fecha).map((fp) => (
+              <li key={fp.id} className="flex items-center gap-3 py-2.5">
+                <input
+                  type="checkbox"
+                  id={`fp-${fp.id}`}
+                  checked={facturasMarcadas.has(fp.id)}
+                  onChange={(e) => {
+                    setFacturasMarcadas((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(fp.id); else next.delete(fp.id);
+                      return next;
+                    });
+                  }}
+                  className="h-5 w-5 rounded border-masa-200 accent-horno-500"
+                />
+                <label htmlFor={`fp-${fp.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
+                  <span>
+                    <span className="font-semibold text-corteza-900">{fp.proveedor.nombre}</span>
+                    {fp.numero && <span className="ml-1.5 text-corteza-400">#{fp.numero}</span>}
                   </span>
                   <span className="font-bold text-corteza-900">${fp.montoTotal.toFixed(2)}</span>
                 </label>
@@ -265,7 +302,7 @@ export function CierreForm({
           <div>
             <h3 className="font-bold text-corteza-900">Transferencias del turno</h3>
             <p className="mt-0.5 text-xs text-corteza-400">
-              Pagos recibidos por transferencia (Banco Pichincha). Se descuentan del efectivo esperado.
+              Pagos recibidos por Deuna o transferencia bancaria. Se descuentan del efectivo esperado.
             </p>
           </div>
           <a
@@ -330,10 +367,9 @@ export function CierreForm({
             {manuales.map((m, idx) => (
               <li key={idx} className="flex items-center gap-2">
                 <input
-                  type="number"
+                  type="text"
                   inputMode="decimal"
-                  step="0.01"
-                  min="0.01"
+                  autoComplete="off"
                   placeholder="Monto $"
                   value={m.monto}
                   onChange={(e) => actualizarManual(idx, "monto", e.target.value)}
@@ -390,10 +426,9 @@ export function CierreForm({
             <input
               id="efectivoContado"
               name="efectivoContado"
-              type="number"
+              type="text"
               inputMode="decimal"
-              step="0.01"
-              min="0"
+              autoComplete="off"
               required
               value={contado}
               onChange={(e) => setContado(e.target.value)}
@@ -445,19 +480,19 @@ export function CierreForm({
             <dt className="text-corteza-400">Cuadre</dt>
             <dd
               className={`text-lg font-bold ${
-                contado === ""
+                !contado.trim()
                   ? "text-corteza-400"
                   : Math.abs(calculo.descuadre) < 0.005
                     ? "text-cuadre-ok"
                     : "text-cuadre-mal"
               }`}
             >
-              {contado === ""
+              {!contado.trim()
                 ? "—"
                 : `${calculo.descuadre >= 0 ? "+" : "−"}$${Math.abs(calculo.descuadre).toFixed(2)}`}
             </dd>
             <dd className="text-xs text-corteza-400">
-              {contado === ""
+              {!contado.trim()
                 ? "cuenta el efectivo"
                 : Math.abs(calculo.descuadre) < 0.005
                   ? "la caja cuadra"

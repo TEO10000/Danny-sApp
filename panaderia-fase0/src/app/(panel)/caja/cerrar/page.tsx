@@ -112,11 +112,12 @@ export default async function CerrarTurnoPage({
   const [datos, facturasCrudas] = await Promise.all([
     datosParaCierre(sucursalId, fecha, turno as TipoTurno),
     prisma.facturaProveedor.findMany({
-      where: { sucursalId, estado: "PENDIENTE" },
+      where: { sucursalId, estado: "PENDIENTE", cierreTurnoId: null },
       select: {
         id: true,
         numero: true,
         montoTotal: true,
+        fecha: true,
         proveedor: { select: { nombre: true } },
       },
       orderBy: { fecha: "asc" },
@@ -128,12 +129,14 @@ export default async function CerrarTurnoPage({
       id: string;
       numero: string | null;
       montoTotal: unknown;
+      fecha: Date;
       proveedor: { nombre: string };
     }>
   ).map((f) => ({
     id: f.id,
     numero: f.numero,
     montoTotal: Number(f.montoTotal),
+    fecha: f.fecha.toISOString().slice(0, 10),
     proveedor: f.proveedor,
   }));
 

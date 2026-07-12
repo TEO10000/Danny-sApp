@@ -6,6 +6,7 @@ import { crearFactura, type EstadoFactura } from "./actions";
 import { dinero } from "@/lib/catalogo";
 import type { InsumoConUltimoCosto } from "@/lib/facturas";
 import { SelectorBuscador } from "@/components/SelectorBuscador";
+import { normalizarDecimal } from "@/lib/decimales";
 
 type Proveedor = { id: string; nombre: string };
 type Sucursal = { id: string; nombre: string };
@@ -165,8 +166,8 @@ export function FacturaForm({
   const { subtotalVivo, ivaVivo, totalVivo } = useMemo(() => {
     const subtotalVivo = Math.round(
       lineas.reduce((sum, l) => {
-        const c = parseFloat(l.costoTotal);
-        return sum + (isNaN(c) ? 0 : c);
+        const c = normalizarDecimal(l.costoTotal) ?? 0;
+        return sum + c;
       }, 0) * 100
     ) / 100;
     const ivaVivo = aplicaIva ? Math.round(subtotalVivo * 0.15 * 100) / 100 : 0;
@@ -215,8 +216,8 @@ export function FacturaForm({
         l.insumoId === "__nuevo__"
           ? { nombre: l.insumoNuevoNombre.trim(), unidadMedida: l.insumoNuevoUnidad.trim() }
           : undefined,
-      cantidad: parseFloat(l.cantidad) || 0,
-      costoTotal: parseFloat(l.costoTotal) || 0,
+      cantidad: normalizarDecimal(l.cantidad, 3) ?? 0,
+      costoTotal: normalizarDecimal(l.costoTotal) ?? 0,
     })),
     origenRegistro,
     datosIaJson: valoresIniciales?.datosIaJson ?? undefined,
@@ -460,10 +461,9 @@ export function FacturaForm({
                   <div>
                     <label className={labelCls}>Cantidad</label>
                     <input
-                      type="number"
+                      type="text"
                       inputMode="decimal"
-                      step="0.001"
-                      min="0.001"
+                      autoComplete="off"
                       value={l.cantidad}
                       onChange={(e) => actualizarLinea(l.uid, { cantidad: e.target.value })}
                       placeholder="0"
@@ -473,10 +473,9 @@ export function FacturaForm({
                   <div>
                     <label className={labelCls}>Costo total ($)</label>
                     <input
-                      type="number"
+                      type="text"
                       inputMode="decimal"
-                      step="0.01"
-                      min="0.01"
+                      autoComplete="off"
                       value={l.costoTotal}
                       onChange={(e) => actualizarLinea(l.uid, { costoTotal: e.target.value })}
                       placeholder="0.00"

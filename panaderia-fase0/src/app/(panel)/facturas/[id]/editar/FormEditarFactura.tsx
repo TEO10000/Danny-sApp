@@ -4,6 +4,8 @@ import { useState, useMemo } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import Link from "next/link";
 import { editarFactura, type EstadoFactura } from "../../actions";
+import { SelectorBuscador } from "@/components/SelectorBuscador";
+import { normalizarDecimal } from "@/lib/decimales";
 
 type Proveedor = { id: string; nombre: string };
 type Sucursal = { id: string; nombre: string };
@@ -45,50 +47,67 @@ export function FormEditarFactura({
   sucursales: Sucursal[];
   insumos: Insumo[];
 }) {
+  const [proveedorId, setProveedorId] = useState(initialProveedorId);
   const [lineas, setLineas] = useState(
-    initialLineas.map((l, i) => ({ clave: i, ...l }))
+    initialLineas.map((l, i) => ({ clave: i, ...l, cantidad: String(l.cantidad), costoTotal: String(l.costoTotal) }))
   );
   const [aplicaIva, setAplicaIva] = useState(initialAplicaIva);
   const [estado, accion] = useFormState<EstadoFactura, FormData>(editarFactura, null);
 
-  const editarLinea = (clave: number, campo: string, valor: string | number) => {
+  const editarLinea = (clave: number, campo: string, valor: string) => {
     setLineas((ls) => ls.map((l) => (l.clave === clave ? { ...l, [campo]: valor } : l)));
   };
 
   const { subtotalVivo, ivaVivo, totalVivo } = useMemo(() => {
-    const subtotalVivo = Math.round(lineas.reduce((s, l) => s + (Number(l.costoTotal) || 0), 0) * 100) / 100;
+    const subtotalVivo = Math.round(
+      lineas.reduce((s, l) => s + (normalizarDecimal(l.costoTotal) ?? 0), 0) * 100
+    ) / 100;
     const ivaVivo = aplicaIva ? Math.round(subtotalVivo * 0.15 * 100) / 100 : 0;
     const totalVivo = Math.round((subtotalVivo + ivaVivo) * 100) / 100;
     return { subtotalVivo, ivaVivo, totalVivo };
   }, [lineas, aplicaIva]);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    const payload = {
-      id: facturaId,
-      proveedorId: (e.currentTarget.elements.namedItem("proveedorId") as HTMLSelectElement)?.value,
-      sucursalId: (e.currentTarget.elements.namedItem("sucursalId") as HTMLSelectElement)?.value,
-      fecha: (e.currentTarget.elements.namedItem("fecha") as HTMLInputElement)?.value,
-      numero: (e.currentTarget.elements.namedItem("numero") as HTMLInputElement)?.value ?? "",
-      aplicaIva,
-      lineas: lineas.map((l) => ({
-        insumoId: l.insumoId,
-        cantidad: Number(l.cantidad),
-        costoTotal: Number(l.costoTotal),
-      })),
-    };
-    (e.currentTarget.elements.namedItem("payload") as HTMLInputElement).value = JSON.stringify(payload);
-  };
-
   return (
-    <form action={accion} onSubmit={handleSubmit} className="space-y-5">
+    <form
+      action={accion}
+      onSubmit={(e) => {
+        const payloadInput = e.currentTarget.elements.namedItem("payload") as HTMLInputElement;
+        // leer sucursalId del select nativo
+        const sucursalEl = e.currentTarget.elements.namedItem("sucursalId") as HTMLSelectElement;
+        const fechaEl = e.currentTarget.elements.namedItem("fecha") as HTMLInputElement;
+        const numeroEl = e.currentTarget.elements.namedItem("numero") as HTMLInputElement;
+        const payload = {
+          id: facturaId,
+          proveedorId,
+          sucursalId: sucursalEl?.value ?? initialSucursalId,
+          fecha: fechaEl?.value ?? initialFecha,
+          numero: numeroEl?.value ?? "",
+          aplicaIva,
+          lineas: lineas.map((l) => ({
+            insumoId: l.insumoId,
+            cantidad: normalizarDecimal(l.cantidad, 3) ?? 0,
+            costoTotal: normalizarDecimal(l.costoTotal) ?? 0,
+          })),
+        };
+        payloadInput.value = JSON.stringify(payload);
+      }}
+      className="space-y-5"
+    >
       <input type="hidden" name="payload" defaultValue="" />
 
       <div className="grid gap-4 rounded-panel border border-masa-200 bg-white p-5 sm:grid-cols-2">
         <div>
-          <label htmlFor="proveedorId" className="block text-sm font-semibold text-corteza-800">Proveedor</label>
-          <select id="proveedorId" name="proveedorId" defaultValue={initialProveedorId} required className={`mt-1.5 ${inputCls}`}>
-            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
+          <label className="block text-sm font-semibold text-corteza-800">Proveedor</label>
+          <div className="mt-1.5">
+            <SelectorBuscador
+              name="proveedorId-hidden"
+              opciones={proveedores.map((p) => ({ id: p.id, etiqueta: p.nombre }))}
+              valorInicial={initialProveedorId}
+              placeholder="Buscar proveedor…"
+              onSeleccion={setProveedorId}
+              requerido
+            />
+          </div>
         </div>
         <div>
           <label htmlFor="sucursalId" className="block text-sm font-semibold text-corteza-800">Sucursal</label>
@@ -134,23 +153,51 @@ export function FormEditarFactura({
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
                 <label className="block text-xs font-semibold text-corteza-600">Insumo</label>
-                <select value={l.insumoId} onChange={(e) => editarLinea(l.clave, "insumoId", e.target.value)} required className={`mt-1 ${inputCls}`}>
-                  <option value="">Seleccionar…</option>
-                  {insumos.map((i) => <option key={i.id} value={i.id}>{i.nombre} ({i.unidadMedida})</option>)}
-                </select>
+                <div className="mt-1">
+                  <SelectorBuscador
+                    name={`insumo-sel-${l.clave}`}
+                    opciones={insumos.map((i) => ({ id: i.id, etiqueta: `${i.nombre} (${i.unidadMedida})` }))}
+                    valorInicial={l.insumoId}
+                    placeholder="Buscar insumo…"
+                    onSeleccion={(id) => editarLinea(l.clave, "insumoId", id)}
+                    requerido
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-corteza-600">Cantidad</label>
-                <input type="number" inputMode="decimal" step="0.001" min="0.001" value={l.cantidad} onChange={(e) => editarLinea(l.clave, "cantidad", e.target.value)} required className={`mt-1 ${inputCls}`} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={l.cantidad}
+                  onChange={(e) => editarLinea(l.clave, "cantidad", e.target.value)}
+                  required
+                  className={`mt-1 ${inputCls}`}
+                  placeholder="0.000"
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-corteza-600">Costo total ($)</label>
-                <input type="number" inputMode="decimal" step="0.01" min="0.01" value={l.costoTotal} onChange={(e) => editarLinea(l.clave, "costoTotal", e.target.value)} required className={`mt-1 ${inputCls}`} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={l.costoTotal}
+                  onChange={(e) => editarLinea(l.clave, "costoTotal", e.target.value)}
+                  required
+                  className={`mt-1 ${inputCls}`}
+                  placeholder="0.00"
+                />
               </div>
             </div>
           </div>
         ))}
-        <button type="button" onClick={() => setLineas((ls) => [...ls, { clave: Date.now(), insumoId: "", insumoNombre: "", cantidad: 0, costoTotal: 0 }])} className="w-full rounded-panel border-2 border-dashed border-masa-200 px-4 py-3 font-semibold text-corteza-600 hover:border-horno-400 hover:text-horno-600">
+        <button
+          type="button"
+          onClick={() => setLineas((ls) => [...ls, { clave: Date.now(), insumoId: "", insumoNombre: "", cantidad: "0", costoTotal: "0" }])}
+          className="w-full rounded-panel border-2 border-dashed border-masa-200 px-4 py-3 font-semibold text-corteza-600 hover:border-horno-400 hover:text-horno-600"
+        >
           + Agregar línea
         </button>
       </section>

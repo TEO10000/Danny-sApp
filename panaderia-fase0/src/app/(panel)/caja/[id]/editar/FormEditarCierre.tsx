@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { editarCierre, eliminarCierre, editarTransferencias, type EstadoCierre } from "../../actions";
+import { normalizarDecimal } from "@/lib/decimales";
 
 type Fila = {
   productoId: string;
@@ -116,8 +117,8 @@ export function FormEditarCierre({
   const confirmadasIdsJson = JSON.stringify([...confirmadasIds]);
   const manualesNuevasJson = JSON.stringify(
     manualesNuevas
-      .filter((m) => parseFloat(m.monto) > 0)
-      .map((m) => ({ monto: parseFloat(m.monto), referencia: m.referencia || undefined }))
+      .filter((m) => (normalizarDecimal(m.monto) ?? 0) > 0)
+      .map((m) => ({ monto: normalizarDecimal(m.monto) ?? 0, referencia: m.referencia || undefined }))
   );
 
   function agregarManual() {
@@ -199,10 +200,9 @@ export function FormEditarCierre({
               <input
                 id="efectivoContado"
                 name="efectivoContado"
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="0.01"
-                min="0"
+                autoComplete="off"
                 required
                 value={contado}
                 onChange={(e) => setContado(e.target.value)}
@@ -314,10 +314,9 @@ export function FormEditarCierre({
             {manualesNuevas.map((m, idx) => (
               <li key={idx} className="flex items-center gap-2">
                 <input
-                  type="number"
+                  type="text"
                   inputMode="decimal"
-                  step="0.01"
-                  min="0.01"
+                  autoComplete="off"
                   placeholder="Monto $"
                   value={m.monto}
                   onChange={(e) => actualizarManual(idx, "monto", e.target.value)}

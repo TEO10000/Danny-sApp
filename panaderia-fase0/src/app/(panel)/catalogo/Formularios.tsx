@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { crearProducto, actualizarPrecio, type EstadoAccion } from "./actions";
+import { crearProducto, actualizarPrecio, editarProducto, type EstadoAccion } from "./actions";
 
 const CATEGORIAS = [
   { valor: "PAN_SAL", etiqueta: "Pan de sal" },
@@ -89,10 +89,9 @@ export function FormNuevoProducto() {
           <input
             id="precio"
             name="precio"
-            type="number"
+            type="text"
             inputMode="decimal"
-            step="0.01"
-            min="0.01"
+            autoComplete="off"
             required
             className={`mt-1.5 ${inputCls}`}
             placeholder="0.15"
@@ -136,10 +135,9 @@ export function FormPrecio({
       <input
         id={`precio-${productoId}`}
         name="precio"
-        type="number"
+        type="text"
         inputMode="decimal"
-        step="0.01"
-        min="0.01"
+        autoComplete="off"
         defaultValue={precioActual ?? undefined}
         className="w-24 rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2 text-base outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30"
       />
@@ -150,6 +148,72 @@ export function FormPrecio({
       >
         {estado?.ok ? "✓" : "Cambiar"}
       </button>
+    </form>
+  );
+}
+
+export function FormEditarProducto({
+  productoId,
+  nombreActual,
+  categoriaActual,
+}: {
+  productoId: string;
+  nombreActual: string;
+  categoriaActual: string;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [estado, accion] = useFormState(editarProducto, null);
+
+  useEffect(() => {
+    if (estado?.ok) setAbierto(false);
+  }, [estado]);
+
+  if (!abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="rounded-lg border border-masa-200 px-3 py-2 text-sm font-semibold text-corteza-600 hover:bg-masa-100"
+      >
+        Editar
+      </button>
+    );
+  }
+
+  return (
+    <form action={accion} className="flex flex-wrap items-end gap-2">
+      <input type="hidden" name="productoId" value={productoId} />
+      <div>
+        <label className="block text-xs font-semibold text-corteza-600">Nombre</label>
+        <input
+          name="nombre"
+          defaultValue={nombreActual}
+          required
+          minLength={2}
+          className="mt-1 w-40 rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2 text-sm outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-corteza-600">Categoría</label>
+        <select
+          name="categoria"
+          defaultValue={categoriaActual}
+          className="mt-1 rounded-lg border border-masa-200 bg-masa-50 px-2 py-2 text-sm outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30"
+        >
+          {CATEGORIAS.map((c) => (
+            <option key={c.valor} value={c.valor}>{c.etiqueta}</option>
+          ))}
+        </select>
+      </div>
+      <BotonGuardar texto="Guardar" />
+      <button
+        type="button"
+        onClick={() => setAbierto(false)}
+        className="rounded-lg border border-masa-200 px-3 py-2 text-sm text-corteza-500 hover:bg-masa-100"
+      >
+        Cancelar
+      </button>
+      <Mensaje estado={estado} />
     </form>
   );
 }

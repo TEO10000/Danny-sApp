@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { z } from "zod";
 import type { ProductoConPrecio } from "@/lib/catalogo";
 import { crearCampania, editarCampania, eliminarCampania } from "./actions";
+import { normalizarDecimal } from "@/lib/decimales";
 
 const SchemaCampaniaCliente = z
   .object({
@@ -66,12 +67,13 @@ export function CampaniaForm({ sucursales, productos, inicial }: Props) {
     setErrores({});
     setErrorGlobal("");
 
+    const costoRaw = costoRef.current?.value ?? "0";
     const datos = {
       nombre: nombreRef.current?.value ?? "",
       descripcion: descripcionRef.current?.value ?? "",
       fechaInicio: fechaInicioRef.current?.value ?? "",
       fechaFin: fechaFinRef.current?.value ?? "",
-      costo: costoRef.current?.value ?? "0",
+      costo: normalizarDecimal(costoRaw) ?? costoRaw,
       sucursalId: sucursalRef.current?.value || null,
       productosIds: productosSeleccionados,
     };
@@ -192,9 +194,9 @@ export function CampaniaForm({ sucursales, productos, inicial }: Props) {
         </label>
         <input
           ref={costoRef}
-          type="number"
-          min="0"
-          step="0.01"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
           defaultValue={inicial?.costo ?? "0"}
           className="w-full rounded-lg border border-masa-200 px-3 py-2 text-sm"
         />

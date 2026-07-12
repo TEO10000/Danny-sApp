@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { zMonto } from "@/lib/decimales";
 
 async function exigirAdmin() {
   const session = await auth();
@@ -13,10 +16,12 @@ async function exigirAdmin() {
   return session.user;
 }
 
+const CATEGORIAS_ENUM = z.enum(["PAN_SAL", "PAN_DULCE", "PASTELERIA", "GALLETERIA", "EMPAQUETADO"]);
+
 const productoSchema = z.object({
   nombre: z.string().trim().min(2, "El nombre es muy corto."),
-  categoria: z.enum(["PAN_SAL", "PAN_DULCE", "PASTELERIA", "GALLETERIA", "EMPAQUETADO"]),
-  precio: z.coerce.number().positive("El precio debe ser mayor a 0."),
+  categoria: CATEGORIAS_ENUM,
+  precio: zMonto,
   codigoBarras: z
     .string()
     .trim()
@@ -62,7 +67,7 @@ export async function crearProducto(
 
 const precioSchema = z.object({
   productoId: z.string().min(1),
-  precio: z.coerce.number().positive("El precio debe ser mayor a 0."),
+  precio: zMonto,
 });
 
 export async function actualizarPrecio(
@@ -99,4 +104,70 @@ export async function cambiarActivo(formData: FormData): Promise<void> {
   await prisma.producto.update({ where: { id }, data: { activo } });
   revalidatePath("/catalogo");
   revalidatePath("/precios");
+}
+
+const editarProductoSchema = z.object({
+  productoId: z.string().min(1, "ID de producto inválido."),
+  nombre: z.string().trim().min(2, "El nombre debe tener al menos 2 caracteres."),
+  categoria: CATEGORIAS_ENUM,
+});
+
+export async function editarProducto(
+  _prev: EstadoAccion,
+  formData: FormData
+): Promise<EstadoAccion> {
+  const admin = await exigirAdmin();
+
+  const parsed = editarProductoSchema.safeParse({
+    productoId: formData.get("productoId"),
+    nombre: formData.get("nombre"),
+    categoria: formData.get("categoria"),
+  });
+  if (!parsed.success) {
+    return { ok: false, mensaje: parsed.error.errors[0].message };
+  }
+  const { productoId, nombre, categoria } = parsed.data;
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const actual = await tx.producto.findUniqueOrThrow({ where: { id: productoId } });
+
+      // Verificar duplicado de nombre entre productos activos (excluyendo el actual)
+      const duplicado = await tx.producto.findFirst({
+        where: { nombre, activo: true, id: { not: productoId } },
+        select: { id: true },
+      });
+      if (duplicado) {
+        throw new Error(`Ya existe un producto activo con el nombre "${nombre}".`);
+      }
+
+      const cambios: Array<{ campo: string; valorAnterior: string; valorNuevo: string }> = [];
+      if (actual.nombre !== nombre) {
+        cambios.push({ campo: "nombre", valorAnterior: actual.nombre, valorNuevo: nombre });
+      }
+      if (actual.categoria !== categoria) {
+        cambios.push({ campo: "categoria", valorAnterior: actual.categoria, valorNuevo: categoria });
+      }
+
+      if (cambios.length === 0) return; // nada cambió
+
+      await tx.producto.update({ where: { id: productoId }, data: { nombre, categoria } });
+
+      await registrarAuditoria(tx, {
+        entidad: "Producto",
+        entidadId: productoId,
+        accion: "EDITAR",
+        cambios,
+        userId: admin.id!,
+      });
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "No se pudo guardar.";
+    return { ok: false, mensaje: msg };
+  }
+
+  revalidatePath("/catalogo");
+  revalidatePath("/precios");
+  revalidatePath("/produccion");
+  return { ok: true, mensaje: "Producto actualizado correctamente." };
 }

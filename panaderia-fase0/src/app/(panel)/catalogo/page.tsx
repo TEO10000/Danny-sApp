@@ -1,5 +1,5 @@
 import { productosConPrecio, etiquetaCategoria, dinero } from "@/lib/catalogo";
-import { FormNuevoProducto, FormPrecio } from "./Formularios";
+import { FormNuevoProducto, FormPrecio, FormEditarProducto } from "./Formularios";
 import { cambiarActivo } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +60,12 @@ export default async function CatalogoPage() {
                       {p.codigoBarras ? ` · cód. ${p.codigoBarras}` : ""}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <FormEditarProducto
+                      productoId={p.id}
+                      nombreActual={p.nombre}
+                      categoriaActual={p.categoria}
+                    />
                     <FormPrecio productoId={p.id} precioActual={p.precioVigente} />
                     <form action={cambiarActivo}>
                       <input type="hidden" name="productoId" value={p.id} />
