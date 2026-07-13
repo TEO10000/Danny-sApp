@@ -314,7 +314,7 @@ export function CierreForm({
           <div>
             <h3 className="font-bold text-corteza-900">Transferencias del turno</h3>
             <p className="mt-0.5 text-xs text-corteza-400">
-              Pagos recibidos por Deuna o transferencia bancaria. Se descuentan del efectivo esperado.
+              Pagos recibidos por Deuna o transferencia. Ese dinero entra a la cuenta del banco (no al cajón), por eso no se cuenta dentro del efectivo esperado en caja — pero sí suma a las ventas del turno.
             </p>
           </div>
           <a
@@ -472,11 +472,6 @@ export function CierreForm({
           + Agregar transferencia manual
         </button>
 
-        {hayTransferencias && calculo.totalTransferencias > 0 && (
-          <p className="mt-2 text-right text-sm font-semibold text-corteza-600">
-            Total transferencias: −${calculo.totalTransferencias.toFixed(2)}
-          </p>
-        )}
       </section>
 
       <section className="rounded-panel border border-masa-200 bg-white p-5">
@@ -524,11 +519,18 @@ export function CierreForm({
             <dd className="text-lg font-bold text-corteza-900">
               ${calculo.totalVentas.toFixed(2)}
             </dd>
+            {calculo.totalTransferencias > 0 ? (
+              <>
+                <dd className="text-xs text-corteza-400">
+                  · Efectivo: ${(calculo.totalVentas - calculo.totalTransferencias).toFixed(2)}
+                </dd>
+                <dd className="text-xs text-corteza-400">
+                  · Banco (Deuna/transf.): ${calculo.totalTransferencias.toFixed(2)}
+                </dd>
+              </>
+            ) : null}
             {calculo.totalFacturas > 0 && (
               <dd className="text-xs text-corteza-400">−${calculo.totalFacturas.toFixed(2)} facturas</dd>
-            )}
-            {calculo.totalTransferencias > 0 && (
-              <dd className="text-xs text-corteza-400">−${calculo.totalTransferencias.toFixed(2)} transf.</dd>
             )}
           </div>
           <div>
@@ -537,9 +539,11 @@ export function CierreForm({
               ${calculo.esperado.toFixed(2)}
             </dd>
             <dd className="text-xs text-corteza-400">
-              $40 fondo + ventas
+              $40 fondo
+              {calculo.totalTransferencias > 0
+                ? ` + $${(calculo.totalVentas - calculo.totalTransferencias).toFixed(2)} efectivo`
+                : " + ventas"}
               {calculo.totalFacturas > 0 ? " − facturas" : ""}
-              {calculo.totalTransferencias > 0 ? " − transf." : ""}
             </dd>
           </div>
           <div>

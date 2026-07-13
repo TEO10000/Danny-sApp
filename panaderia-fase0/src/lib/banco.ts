@@ -71,10 +71,18 @@ function credencialesPara(sucursalNombre: string): CredencialesIMAP | null {
     const user = process.env.BANCO_IMAP_USER_PRINCIPAL;
     const pass = process.env.BANCO_IMAP_PASS_PRINCIPAL;
     if (user && pass) return { user, pass };
+    const faltantes = [!user && "BANCO_IMAP_USER_PRINCIPAL", !pass && "BANCO_IMAP_PASS_PRINCIPAL"]
+      .filter(Boolean)
+      .join(", ");
+    console.warn(`[banco] faltan variables de entorno: ${faltantes}`);
   } else if (nombre.includes("consejo")) {
     const user = process.env.BANCO_IMAP_USER_CONSEJO;
     const pass = process.env.BANCO_IMAP_PASS_CONSEJO;
     if (user && pass) return { user, pass };
+    const faltantes = [!user && "BANCO_IMAP_USER_CONSEJO", !pass && "BANCO_IMAP_PASS_CONSEJO"]
+      .filter(Boolean)
+      .join(", ");
+    console.warn(`[banco] faltan variables de entorno: ${faltantes}`);
   }
   return null;
 }

@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { datosParaCierre, fechaDia, finDeTurno, strDeFechaDia, type TipoTurno } from "@/lib/turnos";
+import { ventanaTurno } from "@/lib/cierres";
 import { recalcularCierre, cierreSiguiente } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { normalizarDecimal } from "@/lib/decimales";
@@ -131,8 +132,11 @@ export async function registrarCierre(
     ) * 100
   ) / 100;
 
+  // Franja exacta del turno (nunca confiar en ventanas del cliente)
+  const franja = ventanaTurno(d.fecha, d.tipoTurno as TipoTurno);
+
   // Re-verificar transferencias sugeridas desde la DB (montos siempre desde BD)
-  const datosVentana = datos; // ya tenemos inicioVentana y finVentana
+  // Acepta cualquier sugerida elegible hasta el fin de la franja (incluye "anteriores")
   const sugeridasVerificadas =
     transferenciasData.sugeridasConfirmadasIds.length > 0
       ? await prisma.transferenciaTurno.findMany({
@@ -140,9 +144,8 @@ export async function registrarCierre(
             id: { in: transferenciasData.sugeridasConfirmadasIds },
             sucursalId: d.sucursalId,
             estado: "SUGERIDA",
-            ...(datosVentana.inicioVentana
-              ? { hora: { gt: datosVentana.inicioVentana, lte: datosVentana.finVentana } }
-              : { hora: { lte: datosVentana.finVentana } }),
+            cierreTurnoId: null,
+            OR: [{ hora: { lte: franja.hasta } }, { hora: null }],
           },
           select: { id: true, monto: true },
         })
@@ -198,19 +201,18 @@ export async function registrarCierre(
     sugeridasVerificadas as Array<{ id: string; monto: unknown }>
   ).map((t) => t.id);
 
-  // IDs de sugeridas en ventana que NO confirmó la empleada → DESCARTADA
-  const todasSugeridasEnVentana = await prisma.transferenciaTurno.findMany({
+  // Solo descartar SUGERIDAS de este turno no confirmadas
+  // Las "anteriores" (hora < franja.desde) se conservan SUGERIDA para cierres futuros
+  const sugeridasDeLaFranja = await prisma.transferenciaTurno.findMany({
     where: {
       sucursalId: d.sucursalId,
       estado: "SUGERIDA",
       cierreTurnoId: null,
-      ...(datosVentana.inicioVentana
-        ? { hora: { gt: datosVentana.inicioVentana, lte: datosVentana.finVentana } }
-        : { hora: { lte: datosVentana.finVentana } }),
+      hora: { gt: franja.desde, lte: franja.hasta },
     },
     select: { id: true },
   });
-  const descartadasIds = todasSugeridasEnVentana
+  const descartadasIds = sugeridasDeLaFranja
     .map((t) => t.id)
     .filter((id) => !sugeridasVerificadasIds.includes(id));
 
