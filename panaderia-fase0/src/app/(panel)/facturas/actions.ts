@@ -9,6 +9,7 @@ import { Prisma } from "@prisma/client";
 import { recalcularCierre } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { calcularTotalesFactura } from "@/lib/facturas";
+import { zMonto, zCantidad } from "@/lib/decimales";
 
 export type EstadoFactura = { ok: boolean; mensaje: string } | null;
 
@@ -23,8 +24,8 @@ const lineaSchema = z
         unidadMedida: z.string().min(1, "La unidad de medida es requerida"),
       })
       .optional(),
-    cantidad: z.coerce.number().positive("La cantidad debe ser mayor a 0"),
-    costoTotal: z.coerce.number().positive("El costo debe ser mayor a 0"),
+    cantidad: zCantidad(3),
+    costoTotal: zMonto,
   })
   .refine((d) => d.insumoId || d.insumoNuevo, {
     message: "Cada línea debe tener un insumo seleccionado o nuevo",
@@ -242,8 +243,8 @@ const editarFacturaSchema = z.object({
   lineas: z.array(
     z.object({
       insumoId: z.string().min(1, "Elige el insumo."),
-      cantidad: z.coerce.number().positive("La cantidad debe ser mayor a 0."),
-      costoTotal: z.coerce.number().positive("El costo debe ser mayor a 0."),
+      cantidad: zCantidad(3),
+      costoTotal: zMonto,
     })
   ).min(1, "Agrega al menos una línea."),
 });

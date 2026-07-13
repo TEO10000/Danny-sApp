@@ -151,8 +151,8 @@ export function FacturaForm({
 
   // Costo unitario en vivo por línea
   const costoUnitarioDe = (l: LineaEstado): number | null => {
-    const qty = parseFloat(l.cantidad);
-    const cost = parseFloat(l.costoTotal);
+    const qty = normalizarDecimal(l.cantidad, 3) ?? 0;
+    const cost = normalizarDecimal(l.costoTotal) ?? 0;
     if (qty > 0 && cost > 0) return Math.round((cost / qty) * 10000) / 10000;
     return null;
   };
@@ -185,8 +185,8 @@ export function FacturaForm({
       if (!l.insumoId) return false;
       if (l.insumoId === "__nuevo__" && (!l.insumoNuevoNombre.trim() || !l.insumoNuevoUnidad.trim()))
         return false;
-      const qty = parseFloat(l.cantidad);
-      const cost = parseFloat(l.costoTotal);
+      const qty = normalizarDecimal(l.cantidad, 3) ?? 0;
+      const cost = normalizarDecimal(l.costoTotal) ?? 0;
       if (!(qty > 0) || !(cost > 0)) return false;
     }
     return true;

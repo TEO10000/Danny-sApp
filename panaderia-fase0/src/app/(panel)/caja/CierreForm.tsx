@@ -41,6 +41,15 @@ const fmtHoraEC = new Intl.DateTimeFormat("es-EC", {
   hour12: false,
 });
 
+const fmtFechaHoraEC = new Intl.DateTimeFormat("es-EC", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "America/Guayaquil",
+  hour12: false,
+});
+
 function BotonGuardar() {
   const { pending } = useFormStatus();
   return (
@@ -61,6 +70,7 @@ export function CierreForm({
   filas,
   facturasPendientes = [],
   transferencias = [],
+  transferenciasAnteriores = [],
   errorBanco = null,
 }: {
   sucursalId: string;
@@ -69,6 +79,7 @@ export function CierreForm({
   filas: Fila[];
   facturasPendientes?: FacturaPendiente[];
   transferencias?: TransferenciaSugerida[];
+  transferenciasAnteriores?: TransferenciaSugerida[];
   errorBanco?: string | null;
 }) {
   const [sobrantes, setSobrantes] = useState<Record<string, string>>(
@@ -77,7 +88,7 @@ export function CierreForm({
   const [contado, setContado] = useState("");
   const [facturasMarcadas, setFacturasMarcadas] = useState<Set<string>>(new Set());
   const [transConfirmadas, setTransConfirmadas] = useState<Set<string>>(
-    new Set(transferencias.map((t) => t.id))
+    new Set(transferencias.map((t) => t.id)) // anteriores desmarcadas por defecto
   );
   const [manuales, setManuales] = useState<Array<{ monto: string; referencia: string }>>([]);
   const [estado, accion] = useFormState<EstadoCierre, FormData>(registrarCierre, null);
@@ -98,8 +109,9 @@ export function CierreForm({
       const fp = facturasPendientes.find((f) => f.id === id);
       return sum + (fp?.montoTotal ?? 0);
     }, 0);
+    const allTransferencias = [...transferencias, ...transferenciasAnteriores];
     const totalTransConf = Array.from(transConfirmadas).reduce((sum, id) => {
-      const t = transferencias.find((t) => t.id === id);
+      const t = allTransferencias.find((t) => t.id === id);
       return sum + (t?.monto ?? 0);
     }, 0);
     const totalManuales = manuales.reduce((sum, m) => sum + (normalizarDecimal(m.monto) ?? 0), 0);
@@ -108,7 +120,7 @@ export function CierreForm({
     const cont = normalizarDecimal(contado) ?? 0;
     const descuadre = cont - esperado;
     return { totalVentas, totalFacturas, totalTransferencias, esperado, descuadre, porFila, hayNegativos };
-  }, [filas, sobrantes, contado, facturasMarcadas, facturasPendientes, transConfirmadas, transferencias, manuales]);
+  }, [filas, sobrantes, contado, facturasMarcadas, facturasPendientes, transConfirmadas, transferencias, transferenciasAnteriores, manuales]);
 
   const sobrantesJson = JSON.stringify(
     filas.map((f) => ({
@@ -134,7 +146,7 @@ export function CierreForm({
     setManuales((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  const hayTransferencias = transferencias.length > 0 || manuales.length > 0;
+  const hayTransferencias = transferencias.length > 0 || transferenciasAnteriores.length > 0 || manuales.length > 0;
 
   return (
     <form action={accion} className="space-y-5">
@@ -320,45 +332,99 @@ export function CierreForm({
         )}
 
         {transferencias.length > 0 && (
-          <ul className="mt-3 divide-y divide-masa-100">
-            {transferencias.map((t) => (
-              <li key={t.id} className="flex items-center gap-3 py-2.5">
-                <input
-                  type="checkbox"
-                  id={`tr-${t.id}`}
-                  checked={transConfirmadas.has(t.id)}
-                  onChange={(e) => {
-                    setTransConfirmadas((prev) => {
-                      const next = new Set(prev);
-                      if (e.target.checked) next.add(t.id);
-                      else next.delete(t.id);
-                      return next;
-                    });
-                  }}
-                  className="h-5 w-5 rounded border-masa-200 accent-horno-500"
-                />
-                <label htmlFor={`tr-${t.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
-                  <span>
-                    <span className="font-semibold text-corteza-900">${t.monto.toFixed(2)}</span>
-                    {t.hora && (
-                      <span className="ml-1.5 text-corteza-400">
-                        {fmtHoraEC.format(new Date(t.hora))}
-                      </span>
-                    )}
-                    {t.referencia && (
-                      <span className="ml-1.5 text-corteza-400">#{t.referencia}</span>
-                    )}
-                    {t.remitente && (
-                      <span className="ml-1.5 text-xs text-corteza-400"> · {t.remitente}</span>
-                    )}
-                  </span>
-                  <span className="rounded-full bg-masa-100 px-2 py-0.5 text-xs text-corteza-500">
-                    correo
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          <>
+            {transferenciasAnteriores.length > 0 && (
+              <p className="mt-3 text-xs font-semibold text-corteza-500 uppercase tracking-wide">
+                De este turno
+              </p>
+            )}
+            <ul className="mt-1 divide-y divide-masa-100">
+              {transferencias.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    id={`tr-${t.id}`}
+                    checked={transConfirmadas.has(t.id)}
+                    onChange={(e) => {
+                      setTransConfirmadas((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(t.id);
+                        else next.delete(t.id);
+                        return next;
+                      });
+                    }}
+                    className="h-5 w-5 rounded border-masa-200 accent-horno-500"
+                  />
+                  <label htmlFor={`tr-${t.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
+                    <span>
+                      <span className="font-semibold text-corteza-900">${t.monto.toFixed(2)}</span>
+                      {t.hora && (
+                        <span className="ml-1.5 text-corteza-400">
+                          {fmtHoraEC.format(new Date(t.hora))}
+                        </span>
+                      )}
+                      {t.referencia && (
+                        <span className="ml-1.5 text-corteza-400">#{t.referencia}</span>
+                      )}
+                      {t.remitente && (
+                        <span className="ml-1.5 text-xs text-corteza-400"> · {t.remitente}</span>
+                      )}
+                    </span>
+                    <span className="rounded-full bg-masa-100 px-2 py-0.5 text-xs text-corteza-500">
+                      correo
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {transferenciasAnteriores.length > 0 && (
+          <>
+            <p className="mt-3 text-xs font-semibold text-corteza-500 uppercase tracking-wide">
+              Anteriores sin confirmar
+            </p>
+            <ul className="mt-1 divide-y divide-masa-100">
+              {transferenciasAnteriores.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    id={`tr-${t.id}`}
+                    checked={transConfirmadas.has(t.id)}
+                    onChange={(e) => {
+                      setTransConfirmadas((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(t.id);
+                        else next.delete(t.id);
+                        return next;
+                      });
+                    }}
+                    className="h-5 w-5 rounded border-masa-200 accent-horno-500"
+                  />
+                  <label htmlFor={`tr-${t.id}`} className="flex flex-1 items-center justify-between gap-2 text-sm">
+                    <span>
+                      <span className="font-semibold text-corteza-900">${t.monto.toFixed(2)}</span>
+                      {t.hora && (
+                        <span className="ml-1.5 text-corteza-400">
+                          {fmtFechaHoraEC.format(new Date(t.hora))}
+                        </span>
+                      )}
+                      {t.referencia && (
+                        <span className="ml-1.5 text-corteza-400">#{t.referencia}</span>
+                      )}
+                      {t.remitente && (
+                        <span className="ml-1.5 text-xs text-corteza-400"> · {t.remitente}</span>
+                      )}
+                    </span>
+                    <span className="rounded-full bg-masa-100 px-2 py-0.5 text-xs text-corteza-500">
+                      correo
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         {/* Transferencias manuales */}

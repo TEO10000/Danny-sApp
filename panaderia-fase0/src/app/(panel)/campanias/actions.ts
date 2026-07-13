@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { normalizarDecimal } from "@/lib/decimales";
 import { Prisma } from "@prisma/client";
 
 async function exigirAdmin() {
@@ -19,7 +20,10 @@ const SchemaCampania = z.object({
   descripcion: z.string().optional(),
   fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida."),
   fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida."),
-  costo: z.coerce.number().min(0, "El costo no puede ser negativo."),
+  costo: z.preprocess(
+    (v) => normalizarDecimal(typeof v === "string" || typeof v === "number" ? v : String(v ?? "")),
+    z.number({ invalid_type_error: "Ingresa un monto válido" }).min(0, "El costo no puede ser negativo.")
+  ),
   sucursalId: z.string().nullable(),
   productosIds: z.array(z.string()).min(1, "Selecciona al menos un producto."),
 });

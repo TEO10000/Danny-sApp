@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { datosParaCierre, TURNOS, etiquetaTurno, type TipoTurno } from "@/lib/turnos";
-import { leerTransferencias } from "@/lib/banco";
+import { leerTransferencias, normalizarMessageId } from "@/lib/banco";
+import { ventanaTurno } from "@/lib/cierres";
 import { CierreForm } from "../CierreForm";
 
 export const dynamic = "force-dynamic";
@@ -172,19 +173,21 @@ export default async function CerrarTurnoPage({
     );
   }
 
+  // Franja horaria exacta del turno (UTC-5 explícito)
+  const franja = ventanaTurno(fecha, turno as TipoTurno);
+  // Lectura ampliada −48 h para capturar correos rezagados
+  const desdeLectura = new Date(franja.desde.getTime() - 48 * 3600 * 1000);
+
   // Leer transferencias del buzón del banco para este turno
-  const resultadoBanco = await leerTransferencias(
-    sucursalNombre,
-    datos.inicioVentana,
-    datos.finVentana
-  );
+  const resultadoBanco = await leerTransferencias(sucursalNombre, desdeLectura, franja.hasta);
 
   // Persistir sugeridas (upsert por messageId — idempotente)
   if (resultadoBanco.ok && resultadoBanco.transferencias.length > 0) {
     for (const t of resultadoBanco.transferencias) {
       if (!t.messageId) continue;
+      const msgId = normalizarMessageId(t.messageId);
       await prisma.transferenciaTurno.upsert({
-        where: { messageId: t.messageId },
+        where: { messageId: msgId },
         update: {}, // no sobreescribir si ya existe
         create: {
           sucursalId,
@@ -192,7 +195,7 @@ export default async function CerrarTurnoPage({
           referencia: t.referencia ?? null,
           remitente: t.remitente ?? null,
           hora: t.hora ?? null,
-          messageId: t.messageId,
+          messageId: msgId,
           estado: "SUGERIDA",
           origen: "CORREO",
         },
@@ -200,27 +203,39 @@ export default async function CerrarTurnoPage({
     }
   }
 
-  // Cargar todas las SUGERIDAS de esta sucursal con hora en la ventana del turno
-  const sugeridas = await prisma.transferenciaTurno.findMany({
-    where: {
-      sucursalId,
-      estado: "SUGERIDA",
-      cierreTurnoId: null,
-      ...(datos.inicioVentana
-        ? { hora: { gt: datos.inicioVentana, lte: datos.finVentana } }
-        : { hora: { lte: datos.finVentana } }),
-    },
-    orderBy: { hora: "asc" },
-  });
+  // SUGERIDAS divididas en dos grupos por franja del turno
+  const [sugeridasEsteTurno, sugeridasAnteriores] = await Promise.all([
+    prisma.transferenciaTurno.findMany({
+      where: {
+        sucursalId,
+        estado: "SUGERIDA",
+        cierreTurnoId: null,
+        hora: { gt: franja.desde, lte: franja.hasta },
+      },
+      orderBy: { hora: "asc" },
+    }),
+    prisma.transferenciaTurno.findMany({
+      where: {
+        sucursalId,
+        estado: "SUGERIDA",
+        cierreTurnoId: null,
+        OR: [{ hora: { lte: franja.desde } }, { hora: null }],
+      },
+      orderBy: { hora: "asc" },
+    }),
+  ]);
 
-  const transferenciasParaForm = sugeridas.map((t) => ({
+  const toFormRow = (t: typeof sugeridasEsteTurno[0]) => ({
     id: t.id,
     monto: Number(t.monto),
     referencia: t.referencia,
     remitente: t.remitente,
     hora: t.hora?.toISOString() ?? null,
     origen: t.origen as "CORREO" | "MANUAL",
-  }));
+  });
+
+  const transferenciasParaForm = sugeridasEsteTurno.map(toFormRow);
+  const transAnterioresParaForm = sugeridasAnteriores.map(toFormRow);
 
   return (
     <div className="space-y-5">
@@ -246,6 +261,7 @@ export default async function CerrarTurnoPage({
         filas={datos.filas}
         facturasPendientes={facturasPendientes}
         transferencias={transferenciasParaForm}
+        transferenciasAnteriores={transAnterioresParaForm}
         errorBanco={resultadoBanco.ok ? null : resultadoBanco.motivo}
       />
     </div>

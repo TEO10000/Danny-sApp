@@ -31,6 +31,10 @@ const LISTA_NEGRA = [
 // Para Pichincha: debe contener alguna de estas palabras
 const PUERTA_PICHINCHA = ["recib", "acredit", "deposito", "abono", "credito"];
 
+export function normalizarMessageId(s: string): string {
+  return s.replace(/^<|>$/g, "").trim();
+}
+
 function normalizarAsunto(asunto: string): string {
   return asunto
     .toLowerCase()
@@ -150,7 +154,7 @@ export async function leerTransferencias(
             if (infoMap.has(uid)) continue; // ya procesado por otro remitente
             infoMap.set(uid, {
               uid,
-              messageId: msg.envelope.messageId ?? `uid-${uid}-${Date.now()}`,
+              messageId: normalizarMessageId(msg.envelope.messageId ?? `uid-${uid}-${Date.now()}`),
               subject: msg.envelope.subject ?? "",
               fromAddr: msg.envelope.from?.[0]?.address ?? "",
               date: msg.envelope.date,
@@ -175,7 +179,9 @@ export async function leerTransferencias(
         where: { messageId: { in: todosMessageIds } },
         select: { messageId: true },
       });
-      const yaRegistradosSet = new Set(yaRegistrados.map((t) => t.messageId));
+      const yaRegistradosSet = new Set(
+        yaRegistrados.flatMap((t) => t.messageId != null ? [normalizarMessageId(t.messageId)] : [])
+      );
 
       const candidatos = todosInfo.filter((i) => !yaRegistradosSet.has(i.messageId));
       const countYaReg = todosInfo.length - candidatos.length;

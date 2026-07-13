@@ -102,7 +102,7 @@ export function FormEditarCierre({
       totalVentas += vendidos * f.precio;
     }
     const esperado = 40 + totalVentas - totalTransferenciasActual;
-    const cont = parseFloat(contado) || 0;
+    const cont = normalizarDecimal(contado) ?? 0;
     const descuadre = cont - esperado;
     return { totalVentas, esperado, descuadre };
   }, [filasIniciales, sobrantes, contado, totalTransferenciasActual]);

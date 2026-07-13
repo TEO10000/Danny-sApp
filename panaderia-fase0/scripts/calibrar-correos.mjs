@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 // Uso: node --env-file=.env scripts/calibrar-correos.mjs
-// Conecta al buzón, imprime asunto + texto limpio de los últimos 15 correos
-// por cada remitente y muestra qué extraería cada parser.
-// Sirve para calibrar los patrones antes de usar en producción.
+// Conecta al buzón, imprime tabla de diagnóstico de fechas + texto del correo.
+// Sirve para calibrar parsers y detectar si Deuna manda el header Date con offset incorrecto.
 
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const IMAP_USER = process.env.BANCO_IMAP_USER_PRINCIPAL;
-const IMAP_PASS = process.env.BANCO_IMAP_PASS_PRINCIPAL;
+// Usar PRINCIPAL si está disponible, si no CONSEJO
+const IMAP_USER = process.env.BANCO_IMAP_USER_PRINCIPAL ?? process.env.BANCO_IMAP_USER_CONSEJO;
+const IMAP_PASS = process.env.BANCO_IMAP_PASS_PRINCIPAL ?? process.env.BANCO_IMAP_PASS_CONSEJO;
+const CUENTA_USADA = process.env.BANCO_IMAP_USER_PRINCIPAL ? "PRINCIPAL" : "CONSEJO";
 
 if (!IMAP_USER || !IMAP_PASS) {
-  console.error("Faltan BANCO_IMAP_USER_PRINCIPAL y/o BANCO_IMAP_PASS_PRINCIPAL en .env");
+  console.error("Faltan credenciales BANCO_IMAP_USER_*/BANCO_IMAP_PASS_* en .env");
   process.exit(1);
 }
 
@@ -21,6 +22,17 @@ const REMITENTES = [
   { dominio: "deunaapp.com", canal: "DEUNA", limite: 15 },
   { dominio: process.env.BANCO_REMITENTE ?? "pichincha.com", canal: "PICHINCHA", limite: 15 },
 ];
+
+const fmtEC = new Intl.DateTimeFormat("es-EC", {
+  timeZone: "America/Guayaquil",
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+  hour12: false,
+});
+
+// Patrón para encontrar fecha/hora impresa en el cuerpo
+const PATRON_FECHA_CUERPO = /\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})[,\s]+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[APap][Mm])?)/;
+const PATRON_HORA_CUERPO  = /\b(\d{1,2}:\d{2}(?::\d{2})?\s*(?:[APap][Mm])?)\b/;
 
 // ── Parsers inline (espejo de banco-parser.ts) ────────────────────────────────
 
@@ -76,14 +88,14 @@ const client = new ImapFlow({
 try {
   await client.connect();
   await client.getMailboxLock("INBOX");
-  console.log(`\nConectado como ${IMAP_USER}\n`);
+  console.log(`\nConectado como ${IMAP_USER} (cuenta: ${CUENTA_USADA})\n`);
 
   const since30d = new Date(Date.now() - 30 * 86400000);
 
   for (const rem of REMITENTES) {
-    console.log(`\n${"=".repeat(60)}`);
+    console.log(`\n${"=".repeat(70)}`);
     console.log(`REMITENTE: ${rem.dominio} (canal: ${rem.canal})`);
-    console.log("=".repeat(60));
+    console.log("=".repeat(70));
 
     let uids = [];
     try {
@@ -102,9 +114,10 @@ try {
     console.log(`Encontrados: ${uids.length} correo(s)\n`);
 
     for (const uid of uids) {
+      // Fetch envelope + source juntos
       let msgFull;
       try {
-        msgFull = await client.fetchOne(String(uid), { source: true }, { uid: true });
+        msgFull = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
       } catch { continue; }
       if (!msgFull?.source) continue;
 
@@ -115,20 +128,43 @@ try {
 
       const asunto = parsed.subject ?? "(sin asunto)";
       const htmlTexto = typeof parsed.html === "string" ? limpiarHtml(parsed.html) : "";
-      const textoPlano = (parsed.text || htmlTexto || "").slice(0, 800);
+      const textoPlano = (parsed.text || htmlTexto || "").slice(0, 1200);
 
-      console.log(`--- UID ${uid} | ${parsed.date?.toISOString().slice(0, 16)} ---`);
-      console.log(`Asunto: ${asunto}`);
-      console.log(`De:     ${parsed.from?.text ?? "?"}`);
-      console.log(`Texto (primeros 300 chars):\n${textoPlano.slice(0, 300)}`);
+      // Fechas para la tabla de diagnóstico
+      const envelopeDate = msgFull.envelope?.date;
+      const parsedDate   = parsed.date;
+      const rawDateHeader = parsed.headers?.get?.("date") ?? "(no disponible)";
+
+      console.log(`--- UID ${uid} ---`);
+      console.log(`Asunto         : ${asunto}`);
+      console.log(`De             : ${parsed.from?.text ?? "?"}`);
+      console.log(`Date: header   : ${Array.isArray(rawDateHeader) ? rawDateHeader[0] : rawDateHeader}`);
+      console.log(`envelope.date  : ${envelopeDate ? envelopeDate.toISOString() : "null"}`);
+      console.log(`parsed.date ISO: ${parsedDate ? parsedDate.toISOString() : "null"}`);
+      console.log(`parsed.date EC : ${parsedDate ? fmtEC.format(parsedDate) : "null"}`);
+
+      // Buscar fecha/hora impresa en el cuerpo
+      const matchFechaHora = PATRON_FECHA_CUERPO.exec(textoPlano);
+      const matchHoraSola  = PATRON_HORA_CUERPO.exec(textoPlano);
+      if (matchFechaHora) {
+        console.log(`Fecha/hora cuerpo: ${matchFechaHora[0].trim()}`);
+      } else if (matchHoraSola) {
+        console.log(`Hora cuerpo    : ${matchHoraSola[0].trim()}`);
+      } else {
+        console.log(`Fecha/hora cuerpo: (no encontrada)`);
+      }
+
+      // Extracto del cuerpo
+      const extracto = textoPlano.slice(0, 300).replace(/\n/g, " ");
+      console.log(`Cuerpo (300c)  : ${extracto}`);
 
       let resultado;
       if (rem.canal === "DEUNA") {
         resultado = extraerDeuna(asunto, textoPlano);
-        console.log(`Parser Deuna: ${resultado ? JSON.stringify(resultado) : "❌ sin datos"}`);
+        console.log(`Parser Deuna   : ${resultado ? JSON.stringify(resultado) : "❌ sin datos"}`);
       } else {
         resultado = extraerConRegex(textoPlano);
-        console.log(`Parser Pichincha regex: ${resultado ? JSON.stringify(resultado) : "❌ sin datos (caería a IA)"}`);
+        console.log(`Parser Pichincha: ${resultado ? JSON.stringify(resultado) : "❌ sin datos (caería a IA)"}`);
       }
       console.log("");
     }
