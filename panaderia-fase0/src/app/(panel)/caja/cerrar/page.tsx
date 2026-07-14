@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { datosParaCierre, TURNOS, etiquetaTurno, type TipoTurno } from "@/lib/turnos";
-import { leerTransferencias, normalizarMessageId } from "@/lib/banco";
 import { ventanaTurno } from "@/lib/cierres";
 import { CierreForm } from "../CierreForm";
 
@@ -175,33 +174,6 @@ export default async function CerrarTurnoPage({
 
   // Franja horaria exacta del turno (UTC-5 explícito)
   const franja = ventanaTurno(fecha, turno as TipoTurno);
-  // Lectura ampliada −48 h para capturar correos rezagados
-  const desdeLectura = new Date(franja.desde.getTime() - 48 * 3600 * 1000);
-
-  // Leer transferencias del buzón del banco para este turno
-  const resultadoBanco = await leerTransferencias(sucursalNombre, desdeLectura, franja.hasta);
-
-  // Persistir sugeridas (upsert por messageId — idempotente)
-  if (resultadoBanco.ok && resultadoBanco.transferencias.length > 0) {
-    for (const t of resultadoBanco.transferencias) {
-      if (!t.messageId) continue;
-      const msgId = normalizarMessageId(t.messageId);
-      await prisma.transferenciaTurno.upsert({
-        where: { messageId: msgId },
-        update: {}, // no sobreescribir si ya existe
-        create: {
-          sucursalId,
-          monto: t.monto,
-          referencia: t.referencia ?? null,
-          remitente: t.remitente ?? null,
-          hora: t.hora ?? null,
-          messageId: msgId,
-          estado: "SUGERIDA",
-          origen: "CORREO",
-        },
-      });
-    }
-  }
 
   // SUGERIDAS divididas en dos grupos por franja del turno
   const [sugeridasEsteTurno, sugeridasAnteriores] = await Promise.all([
@@ -231,7 +203,7 @@ export default async function CerrarTurnoPage({
     referencia: t.referencia,
     remitente: t.remitente,
     hora: t.hora?.toISOString() ?? null,
-    origen: t.origen as "CORREO" | "MANUAL",
+    origen: t.origen as "CORREO" | "MANUAL" | "QR",
   });
 
   const transferenciasParaForm = sugeridasEsteTurno.map(toFormRow);
@@ -262,7 +234,6 @@ export default async function CerrarTurnoPage({
         facturasPendientes={facturasPendientes}
         transferencias={transferenciasParaForm}
         transferenciasAnteriores={transAnterioresParaForm}
-        errorBanco={resultadoBanco.ok ? null : resultadoBanco.motivo}
       />
     </div>
   );

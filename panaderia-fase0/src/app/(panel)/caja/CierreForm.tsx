@@ -28,7 +28,7 @@ type TransferenciaSugerida = {
   referencia: string | null;
   remitente: string | null;
   hora: string | null;
-  origen: "CORREO" | "MANUAL";
+  origen: "CORREO" | "MANUAL" | "QR";
 };
 
 const inputCls =
@@ -71,7 +71,6 @@ export function CierreForm({
   facturasPendientes = [],
   transferencias = [],
   transferenciasAnteriores = [],
-  errorBanco = null,
 }: {
   sucursalId: string;
   fecha: string;
@@ -80,7 +79,6 @@ export function CierreForm({
   facturasPendientes?: FacturaPendiente[];
   transferencias?: TransferenciaSugerida[];
   transferenciasAnteriores?: TransferenciaSugerida[];
-  errorBanco?: string | null;
 }) {
   const [sobrantes, setSobrantes] = useState<Record<string, string>>(
     Object.fromEntries(filas.map((f) => [f.productoId, ""]))
@@ -325,12 +323,6 @@ export function CierreForm({
           </a>
         </div>
 
-        {errorBanco && (
-          <p role="alert" className="mt-3 rounded-lg bg-masa-100 px-3 py-2 text-sm text-corteza-600">
-            No se pudo leer el correo del banco: {errorBanco}. Registra las transferencias a mano.
-          </p>
-        )}
-
         {transferencias.length > 0 && (
           <>
             {transferenciasAnteriores.length > 0 && (
@@ -370,8 +362,8 @@ export function CierreForm({
                         <span className="ml-1.5 text-xs text-corteza-400"> · {t.remitente}</span>
                       )}
                     </span>
-                    <span className="rounded-full bg-masa-100 px-2 py-0.5 text-xs text-corteza-500">
-                      correo
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${t.origen === "QR" ? "bg-horno-50 text-horno-600" : "bg-masa-100 text-corteza-500"}`}>
+                      {t.origen === "QR" ? "QR" : "correo"}
                     </span>
                   </label>
                 </li>
@@ -417,8 +409,8 @@ export function CierreForm({
                         <span className="ml-1.5 text-xs text-corteza-400"> · {t.remitente}</span>
                       )}
                     </span>
-                    <span className="rounded-full bg-masa-100 px-2 py-0.5 text-xs text-corteza-500">
-                      correo
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${t.origen === "QR" ? "bg-horno-50 text-horno-600" : "bg-masa-100 text-corteza-500"}`}>
+                      {t.origen === "QR" ? "QR" : "correo"}
                     </span>
                   </label>
                 </li>
@@ -463,11 +455,7 @@ export function CierreForm({
         <button
           type="button"
           onClick={agregarManual}
-          className={`mt-3 rounded-lg border px-3 py-2 text-sm font-semibold ${
-            errorBanco
-              ? "border-horno-400 bg-horno-50 text-horno-700 hover:bg-horno-100"
-              : "border-masa-200 text-corteza-600 hover:bg-masa-100"
-          }`}
+          className="mt-3 rounded-lg border border-masa-200 px-3 py-2 text-sm font-semibold text-corteza-600 hover:bg-masa-100"
         >
           + Agregar transferencia manual
         </button>

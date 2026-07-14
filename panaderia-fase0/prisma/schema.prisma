@@ -70,6 +70,7 @@ enum EstadoTransferencia {
 enum OrigenTransferencia {
   CORREO
   MANUAL
+  QR
 }
 
 // ===================== Núcleo =====================
@@ -83,13 +84,14 @@ model User {
   activo       Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  cochesProduccion    CocheProduccion[]
-  cierresTurno        CierreTurno[]
-  facturasRegistradas FacturaProveedor[] @relation("FacturaRegistradaPor")
-  facturasPagadas     FacturaProveedor[] @relation("FacturaPagadaPor")
-  planesAprobados     PlanSemanal[]
-  consultasIA         ConsultaIA[]
-  auditLogs           AuditLog[]
+  cochesProduccion           CocheProduccion[]
+  cierresTurno               CierreTurno[]
+  facturasRegistradas        FacturaProveedor[]      @relation("FacturaRegistradaPor")
+  facturasPagadas            FacturaProveedor[]      @relation("FacturaPagadaPor")
+  planesAprobados            PlanSemanal[]
+  consultasIA                ConsultaIA[]
+  auditLogs                  AuditLog[]
+  transferenciasRegistradas  TransferenciaTurno[]
 }
 
 model Sucursal {
@@ -347,23 +349,28 @@ model ConsultaIA {
 // ===================== Transferencias bancarias =====================
 
 model TransferenciaTurno {
-  id            String              @id @default(cuid())
-  sucursalId    String
-  cierreTurnoId String?             // null mientras es sugerencia sin cierre
-  monto         Decimal             @db.Decimal(10, 2)
-  referencia    String?             // nro. de comprobante/documento del banco
-  remitente     String?             // nombre de quien transfirió, si el correo lo trae
-  hora          DateTime?           // momento de la transferencia
-  messageId     String?             @unique // Message-ID del correo: idempotencia
-  estado        EstadoTransferencia @default(SUGERIDA)
-  origen        OrigenTransferencia
-  createdAt     DateTime            @default(now())
+  id              String              @id @default(cuid())
+  sucursalId      String
+  cierreTurnoId   String?             // null mientras es sugerencia sin cierre
+  monto           Decimal             @db.Decimal(10, 2)
+  referencia      String?             // nro. de comprobante/documento del banco
+  remitente       String?             // nombre de quien transfirió
+  beneficiario    String?             // titular de la cuenta destino (para mapeo de sucursal QR)
+  hora            DateTime?           // momento de la transferencia
+  messageId       String?             @unique // clave de idempotencia: Message-ID (correo) o "qr:{comprobante|hash}" (QR)
+  estado          EstadoTransferencia @default(SUGERIDA)
+  origen          OrigenTransferencia
+  registradaPorId String?             // empleada que escaneó el QR (null en filas históricas CORREO/MANUAL)
+  qrCrudo         String?             // contenido bruto decodificado del QR, para auditoría y re-parseo
+  createdAt       DateTime            @default(now())
 
-  sucursal    Sucursal     @relation(fields: [sucursalId], references: [id])
-  cierreTurno CierreTurno? @relation(fields: [cierreTurnoId], references: [id])
+  sucursal      Sucursal     @relation(fields: [sucursalId], references: [id])
+  cierreTurno   CierreTurno? @relation(fields: [cierreTurnoId], references: [id])
+  registradaPor User?        @relation(fields: [registradaPorId], references: [id])
 
   @@index([sucursalId, estado])
   @@index([cierreTurnoId])
+  @@index([registradaPorId])
 }
 
 // ===================== Auditoría =====================

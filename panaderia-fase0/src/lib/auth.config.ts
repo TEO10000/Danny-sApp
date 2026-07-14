@@ -14,6 +14,7 @@ const PERMISOS: Array<{ prefijo: string; roles: string[] }> = [
   { prefijo: "/produccion", roles: ["ADMIN", "PANADERO"] },
   { prefijo: "/caja", roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { prefijo: "/facturas", roles: ["ADMIN", "ATENCION_CLIENTE"] },
+  { prefijo: "/transferencias", roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { prefijo: "/usuarios", roles: ["ADMIN"] },
 ];
 

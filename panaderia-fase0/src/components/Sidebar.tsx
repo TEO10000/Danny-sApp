@@ -71,6 +71,18 @@ const ICONOS: Record<string, React.ReactNode> = {
       <path d="M9 10h.01M13 10h.01M17 10h.01" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   ),
+  transferencias: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="5" y="5" width="3" height="3" fill="currentColor" stroke="none" />
+      <rect x="16" y="5" width="3" height="3" fill="currentColor" stroke="none" />
+      <rect x="5" y="16" width="3" height="3" fill="currentColor" stroke="none" />
+      <path d="M14 14h3v3" />
+      <path d="M21 14v7h-7v-4" />
+    </svg>
+  ),
   usuarios: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="9" cy="7" r="4" />
