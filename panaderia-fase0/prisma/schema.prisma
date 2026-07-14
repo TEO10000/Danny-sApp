@@ -170,6 +170,11 @@ model FacturaProveedor {
   imagenUrl      String? // respaldo de la factura escaneada (Vercel Blob)
   datosIaJson    Json? // extracción cruda de la IA (Fase 4)
 
+  descuentoGlobal Decimal               @default(0) @db.Decimal(10, 2)
+  ice             Decimal               @default(0) @db.Decimal(10, 2)
+  irbp            Decimal               @default(0) @db.Decimal(10, 2)
+  otros           Decimal               @default(0) @db.Decimal(10, 2)
+
   registradaPorId String
   pagadaPorId     String?
   fechaPago       DateTime?
@@ -193,7 +198,9 @@ model CompraInsumo {
   insumoId      String
   cantidad      Decimal @db.Decimal(10, 3)
   costoTotal    Decimal @db.Decimal(10, 2)
-  costoUnitario Decimal @db.Decimal(10, 4)
+  costoUnitario Decimal @db.Decimal(12, 5)
+  descuento     Decimal @default(0) @db.Decimal(10, 2)
+  tarifaIva     Int     @default(0)
 
   factura FacturaProveedor @relation(fields: [facturaId], references: [id])
   insumo  Insumo           @relation(fields: [insumoId], references: [id])

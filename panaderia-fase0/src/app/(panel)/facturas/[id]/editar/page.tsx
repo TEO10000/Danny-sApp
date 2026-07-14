@@ -23,7 +23,6 @@ export default async function EditarFacturaPage({ params }: { params: { id: stri
   });
   if (!factura) notFound();
 
-  // Permisos: PENDIENTE → solo quien la registró o ADMIN; PAGADA → solo ADMIN
   if (factura.estado === "ANULADA") redirect("/facturas?error=anulada");
   if (factura.estado === "PAGADA" && !esAdmin) redirect("/facturas?error=permiso");
   if (factura.estado === "PENDIENTE" && !esAdmin && factura.registradaPorId !== userId) {
@@ -58,13 +57,18 @@ export default async function EditarFacturaPage({ params }: { params: { id: stri
         initialSucursalId={factura.sucursalId}
         initialFecha={factura.fecha.toISOString().slice(0, 10)}
         initialNumero={factura.numero ?? ""}
-        initialAplicaIva={factura.aplicaIva}
         initialLineas={factura.compras.map((c) => ({
           insumoId: c.insumoId,
           insumoNombre: c.insumo.nombre,
           cantidad: Number(c.cantidad),
           costoTotal: Number(c.costoTotal),
+          tarifaIva: (Number(c.tarifaIva) === 15 ? 15 : 0) as 0 | 15,
+          descuento: Number(c.descuento),
         }))}
+        initialDescuentoGlobal={Number(factura.descuentoGlobal)}
+        initialIce={Number(factura.ice)}
+        initialIrbp={Number(factura.irbp)}
+        initialOtros={Number(factura.otros)}
         proveedores={proveedores.map((p) => ({ id: p.id, nombre: p.nombre }))}
         sucursales={sucursales.map((s) => ({ id: s.id, nombre: s.nombre }))}
         insumos={insumos.map((i) => ({ id: i.id, nombre: i.nombre, unidadMedida: i.unidadMedida }))}

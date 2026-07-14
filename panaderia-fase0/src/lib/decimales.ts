@@ -37,3 +37,22 @@ export function zCantidad(decimales = 2) {
     z.number({ invalid_type_error: "Ingresa una cantidad válida" }).positive("La cantidad debe ser mayor a 0")
   );
 }
+
+/** Zod preprocess para montos que pueden ser cero (bonificaciones, descuentos vacíos). */
+export const zMontoCero = z.preprocess(
+  (v) => normalizarDecimal(typeof v === "string" || typeof v === "number" ? v : String(v ?? "")),
+  z.number({ invalid_type_error: "Ingresa un monto válido" }).min(0, "El monto no puede ser negativo")
+);
+
+/** Totales impresos en la factura física (de la IA). Todos los campos son opcionales/null. */
+export type TotalesImpresos = {
+  base0?: number | null;
+  base15?: number | null;
+  descuento?: number | null;
+  subtotal?: number | null;
+  iva?: number | null;
+  ice?: number | null;
+  irbp?: number | null;
+  otros?: number | null;
+  total?: number | null;
+} | null;

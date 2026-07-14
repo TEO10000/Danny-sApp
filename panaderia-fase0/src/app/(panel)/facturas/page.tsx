@@ -44,6 +44,9 @@ type FacturaListada = {
   aplicaIva: boolean;
   subtotal: unknown;
   iva: unknown;
+  ice: unknown;
+  irbp: unknown;
+  otros: unknown;
   estado: EstadoBadge;
   origenPago: string | null;
   registradaPorId: string;
@@ -199,13 +202,13 @@ export default async function FacturasPage({
       </div>
 
       {/* Lista */}
-      {(facturas as FacturaListada[]).length === 0 ? (
+      {(facturas as unknown as FacturaListada[]).length === 0 ? (
         <section className="rounded-panel border border-masa-200 bg-white p-6 text-corteza-600">
           No hay facturas {filtroEstado === "TODAS" ? "" : filtroEstado === "PENDIENTE" ? "pendientes" : "pagadas"} en este filtro.
         </section>
       ) : (
         <ul className="space-y-3">
-          {(facturas as FacturaListada[]).map((f) => (
+          {(facturas as unknown as FacturaListada[]).map((f) => (
             <li key={f.id} className="rounded-panel border border-masa-200 bg-white p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -236,6 +239,13 @@ export default async function FacturasPage({
                     {f.aplicaIva && (
                       <p className="text-xs text-corteza-400">
                         Subtotal {dinero(Number(f.subtotal))} <span className="font-semibold text-horno-600">c/IVA</span>
+                      </p>
+                    )}
+                    {(Number(f.ice) > 0 || Number(f.irbp) > 0 || Number(f.otros) > 0) && (
+                      <p className="text-xs text-corteza-400">
+                        incl.{Number(f.ice) > 0 ? ` ICE ${dinero(Number(f.ice))}` : ""}
+                        {Number(f.irbp) > 0 ? ` IRBP ${dinero(Number(f.irbp))}` : ""}
+                        {Number(f.otros) > 0 ? ` otros ${dinero(Number(f.otros))}` : ""}
                       </p>
                     )}
                   </div>

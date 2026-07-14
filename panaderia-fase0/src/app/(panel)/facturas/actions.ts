@@ -8,8 +8,8 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { recalcularCierre } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
-import { calcularTotalesFactura } from "@/lib/facturas";
-import { zMonto, zCantidad } from "@/lib/decimales";
+import { calcularTotalesFacturaV2 } from "@/lib/facturas";
+import { zMontoCero, zCantidad } from "@/lib/decimales";
 
 export type EstadoFactura = { ok: boolean; mensaje: string } | null;
 
@@ -25,11 +25,24 @@ const lineaSchema = z
       })
       .optional(),
     cantidad: zCantidad(3),
-    costoTotal: zMonto,
+    costoTotal: zMontoCero,
+    descuento: zMontoCero.optional().default(0),
+    tarifaIva: z.preprocess(
+      (v) => (v === null || v === undefined ? 0 : Number(v)),
+      z.union([z.literal(0), z.literal(15)])
+    ),
+    costoUnitario: z.number().optional(),
   })
   .refine((d) => d.insumoId || d.insumoNuevo, {
     message: "Cada línea debe tener un insumo seleccionado o nuevo",
   });
+
+const extrasSchema = z.object({
+  descuentoGlobal: zMontoCero.optional().default(0),
+  ice: zMontoCero.optional().default(0),
+  irbp: zMontoCero.optional().default(0),
+  otros: zMontoCero.optional().default(0),
+});
 
 const crearFacturaSchema = z
   .object({
@@ -45,8 +58,10 @@ const crearFacturaSchema = z
     fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha no es válida"),
     numero: z.string().nullable().optional(),
     lineas: z.array(lineaSchema).min(1, "Agrega al menos una línea"),
-    aplicaIva: z.coerce.boolean().default(false),
-    // Campos opcionales para el flujo de escaneo IA (compatibles con registro manual)
+    descuentoGlobal: zMontoCero.optional().default(0),
+    ice: zMontoCero.optional().default(0),
+    irbp: zMontoCero.optional().default(0),
+    otros: zMontoCero.optional().default(0),
     origenRegistro: z.enum(["MANUAL", "ESCANEO_IA"]).optional(),
     imagenUrl: z.string().nullable().optional(),
     datosIaJson: z.unknown().optional(),
@@ -82,7 +97,6 @@ export async function crearFactura(
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Resolver o crear proveedor
       let proveedorId: string;
       if (d.proveedorId) {
         proveedorId = d.proveedorId;
@@ -97,12 +111,13 @@ export async function crearFactura(
         proveedorId = prov.id;
       }
 
-      // Resolver o crear insumos y construir líneas
       const compras: Array<{
         insumoId: string;
         cantidad: number;
         costoTotal: number;
         costoUnitario: number;
+        descuento: number;
+        tarifaIva: number;
       }> = [];
 
       for (const linea of d.lineas) {
@@ -118,11 +133,35 @@ export async function crearFactura(
           });
           insumoId = ins.id;
         }
-        const costoUnitario = Math.round((linea.costoTotal / linea.cantidad) * 10000) / 10000;
-        compras.push({ insumoId, cantidad: linea.cantidad, costoTotal: linea.costoTotal, costoUnitario });
+        const costoUnitario =
+          linea.costoUnitario ??
+          Math.round((linea.costoTotal / linea.cantidad) * 1e5) / 1e5;
+        compras.push({
+          insumoId,
+          cantidad: linea.cantidad,
+          costoTotal: linea.costoTotal,
+          costoUnitario,
+          descuento: linea.descuento ?? 0,
+          tarifaIva: linea.tarifaIva,
+        });
       }
 
-      const { subtotal, iva, montoTotal } = calcularTotalesFactura(compras, d.aplicaIva);
+      const extras = {
+        descuentoGlobal: d.descuentoGlobal ?? 0,
+        ice: d.ice ?? 0,
+        irbp: d.irbp ?? 0,
+        otros: d.otros ?? 0,
+      };
+      const { subtotal, iva, montoTotal } = calcularTotalesFacturaV2(
+        compras.map((c) => ({
+          cantidad: c.cantidad,
+          costoUnitario: c.costoUnitario,
+          descuento: c.descuento,
+          costoTotal: c.costoTotal,
+          tarifaIva: c.tarifaIva as 0 | 15,
+        })),
+        extras
+      );
 
       await tx.facturaProveedor.create({
         data: {
@@ -131,9 +170,13 @@ export async function crearFactura(
           numero: d.numero ?? null,
           fecha: new Date(d.fecha + "T00:00:00-05:00"),
           montoTotal,
-          aplicaIva: d.aplicaIva,
+          aplicaIva: iva > 0,
           subtotal,
           iva,
+          descuentoGlobal: extras.descuentoGlobal,
+          ice: extras.ice,
+          irbp: extras.irbp,
+          otros: extras.otros,
           estado: "PENDIENTE",
           origenRegistro: d.origenRegistro ?? "MANUAL",
           imagenUrl: d.imagenUrl ?? null,
@@ -239,14 +282,25 @@ const editarFacturaSchema = z.object({
     .trim()
     .transform((v) => (v === "" ? null : v))
     .nullable(),
-  aplicaIva: z.coerce.boolean().default(false),
-  lineas: z.array(
-    z.object({
-      insumoId: z.string().min(1, "Elige el insumo."),
-      cantidad: zCantidad(3),
-      costoTotal: zMonto,
-    })
-  ).min(1, "Agrega al menos una línea."),
+  descuentoGlobal: zMontoCero.optional().default(0),
+  ice: zMontoCero.optional().default(0),
+  irbp: zMontoCero.optional().default(0),
+  otros: zMontoCero.optional().default(0),
+  lineas: z
+    .array(
+      z.object({
+        insumoId: z.string().min(1, "Elige el insumo."),
+        cantidad: zCantidad(3),
+        costoTotal: zMontoCero,
+        descuento: zMontoCero.optional().default(0),
+        tarifaIva: z.preprocess(
+          (v) => (v === null || v === undefined ? 0 : Number(v)),
+          z.union([z.literal(0), z.literal(15)])
+        ),
+        costoUnitario: z.number().optional(),
+      })
+    )
+    .min(1, "Agrega al menos una línea."),
 });
 
 export async function editarFactura(
@@ -276,32 +330,65 @@ export async function editarFactura(
         include: { compras: true },
       });
 
-      // Permisos por estado
       if (actual.estado === "ANULADA") throw new Error("Las facturas anuladas no se pueden editar.");
       if (actual.estado === "PAGADA" && !esAdmin) throw new Error("Solo el administrador puede editar facturas pagadas.");
       if (actual.estado === "PENDIENTE" && !esAdmin && actual.registradaPorId !== userId) {
         throw new Error("Solo puedes editar facturas que registraste tú.");
       }
 
-      // Recalcular totales con IVA
-      const comprasNuevas: Array<{ insumoId: string; cantidad: number; costoTotal: number; costoUnitario: number }> = [];
-      for (const linea of d.lineas) {
-        const costoUnitario = Math.round((linea.costoTotal / linea.cantidad) * 10000) / 10000;
-        comprasNuevas.push({ insumoId: linea.insumoId, cantidad: linea.cantidad, costoTotal: linea.costoTotal, costoUnitario });
-      }
-      const { subtotal, iva, montoTotal } = calcularTotalesFactura(comprasNuevas, d.aplicaIva);
+      const comprasNuevas: Array<{
+        insumoId: string;
+        cantidad: number;
+        costoTotal: number;
+        costoUnitario: number;
+        descuento: number;
+        tarifaIva: number;
+      }> = [];
 
-      // Cambios para auditoría
+      for (const linea of d.lineas) {
+        const costoUnitario =
+          linea.costoUnitario ??
+          Math.round((linea.costoTotal / linea.cantidad) * 1e5) / 1e5;
+        comprasNuevas.push({
+          insumoId: linea.insumoId,
+          cantidad: linea.cantidad,
+          costoTotal: linea.costoTotal,
+          costoUnitario,
+          descuento: linea.descuento ?? 0,
+          tarifaIva: linea.tarifaIva,
+        });
+      }
+
+      const extras = {
+        descuentoGlobal: d.descuentoGlobal ?? 0,
+        ice: d.ice ?? 0,
+        irbp: d.irbp ?? 0,
+        otros: d.otros ?? 0,
+      };
+      const { subtotal, iva, montoTotal } = calcularTotalesFacturaV2(
+        comprasNuevas.map((c) => ({
+          cantidad: c.cantidad,
+          costoUnitario: c.costoUnitario,
+          descuento: c.descuento,
+          costoTotal: c.costoTotal,
+          tarifaIva: c.tarifaIva as 0 | 15,
+        })),
+        extras
+      );
+
+      // Auditoría de cambios
       const cambios: Array<{ campo: string; valorAnterior: string; valorNuevo: string }> = [];
       if (actual.proveedorId !== d.proveedorId) cambios.push({ campo: "proveedorId", valorAnterior: actual.proveedorId, valorNuevo: d.proveedorId });
       if (actual.sucursalId !== d.sucursalId) cambios.push({ campo: "sucursalId", valorAnterior: actual.sucursalId, valorNuevo: d.sucursalId });
       const fechaAnterior = actual.fecha.toISOString().slice(0, 10);
       if (fechaAnterior !== d.fecha) cambios.push({ campo: "fecha", valorAnterior: fechaAnterior, valorNuevo: d.fecha });
       if ((actual.numero ?? null) !== d.numero) cambios.push({ campo: "numero", valorAnterior: actual.numero ?? "(vacío)", valorNuevo: d.numero ?? "(vacío)" });
-      if (actual.aplicaIva !== d.aplicaIva) cambios.push({ campo: "aplicaIva", valorAnterior: String(actual.aplicaIva), valorNuevo: String(d.aplicaIva) });
+      if (Number(actual.descuentoGlobal) !== extras.descuentoGlobal) cambios.push({ campo: "descuentoGlobal", valorAnterior: String(Number(actual.descuentoGlobal)), valorNuevo: String(extras.descuentoGlobal) });
+      if (Number(actual.ice) !== extras.ice) cambios.push({ campo: "ice", valorAnterior: String(Number(actual.ice)), valorNuevo: String(extras.ice) });
+      if (Number(actual.irbp) !== extras.irbp) cambios.push({ campo: "irbp", valorAnterior: String(Number(actual.irbp)), valorNuevo: String(extras.irbp) });
+      if (Number(actual.otros) !== extras.otros) cambios.push({ campo: "otros", valorAnterior: String(Number(actual.otros)), valorNuevo: String(extras.otros) });
       if (Number(actual.montoTotal) !== montoTotal) cambios.push({ campo: "montoTotal", valorAnterior: String(Number(actual.montoTotal)), valorNuevo: String(montoTotal) });
 
-      // Reemplazar compras
       await tx.compraInsumo.deleteMany({ where: { facturaId: d.id } });
       await tx.facturaProveedor.update({
         where: { id: d.id },
@@ -311,9 +398,13 @@ export async function editarFactura(
           fecha: new Date(d.fecha + "T00:00:00-05:00"),
           numero: d.numero,
           montoTotal,
-          aplicaIva: d.aplicaIva,
+          aplicaIva: iva > 0,
           subtotal,
           iva,
+          descuentoGlobal: extras.descuentoGlobal,
+          ice: extras.ice,
+          irbp: extras.irbp,
+          otros: extras.otros,
           compras: { create: comprasNuevas },
         },
       });
@@ -322,7 +413,6 @@ export async function editarFactura(
         await registrarAuditoria(tx, { entidad: "FacturaProveedor", entidadId: d.id, accion: "EDITAR", cambios, userId });
       }
 
-      // Si era PAGADA desde caja y cambió el monto → recalcular cierre
       if (actual.estado === "PAGADA" && actual.origenPago === "CAJA_TURNO" && actual.cierreTurnoId && Number(actual.montoTotal) !== montoTotal) {
         await recalcularCierre(tx, actual.cierreTurnoId);
       }
@@ -389,3 +479,4 @@ export async function revertirPagoFactura(formData: FormData) {
   revalidatePath("/dashboard");
   redirect("/facturas?revertida=1");
 }
+
