@@ -15,15 +15,15 @@ export interface DatosQR {
 
 // ── Titulares y cuentas de cada sucursal ──────────────────────────────────────
 //
-// cuentaEnmascarada: discriminador primario (comparación exacta con t[7] del QR)
+// ultimos4: discriminador primario para cuentas enmascaradas del QR.
 // tokens: fallback por nombre, todos deben estar presentes (⚠ ambos comparten "morales")
 export const CUENTAS_SUCURSAL: Array<{
   sucursal: "Consejo" | "Principal";
-  cuentaEnmascarada: string;
+  ultimos4: string;
   tokens: string[];
 }> = [
-  { sucursal: "Consejo",   cuentaEnmascarada: "****5688", tokens: ["silvia",  "morales"] }, // Silvia Patricia Morales Parra
-  { sucursal: "Principal", cuentaEnmascarada: "****4146", tokens: ["daniel",  "herrera"] }, // Daniel Sebastian Herrera Morales
+  { sucursal: "Consejo",   ultimos4: "5688", tokens: ["silvia",  "morales"] }, // Silvia Patricia Morales Parra
+  { sucursal: "Principal", ultimos4: "4146", tokens: ["daniel",  "herrera"] }, // Daniel Sebastian Herrera Morales
 ];
 
 function normalizarTexto(s: string): string {
@@ -46,8 +46,9 @@ export function detectarSucursal(
 ): "Consejo" | "Principal" | null {
   // Paso 1: por cuenta enmascarada (discriminador más confiable)
   if (cuentaEnmascarada) {
+    const cuentaDigits = cuentaEnmascarada.replace(/\D/g, "");
     for (const entrada of CUENTAS_SUCURSAL) {
-      if (entrada.cuentaEnmascarada === cuentaEnmascarada) return entrada.sucursal;
+      if (cuentaDigits.endsWith(entrada.ultimos4)) return entrada.sucursal;
     }
   }
 
@@ -71,16 +72,28 @@ export function detectarSucursal(
 
 const RE_UUID       = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RE_EPOCH_10   = /^\d{10}$/;
+const RE_EPOCH_13   = /^\d{13}$/;
 const RE_MONTO_POS  = /^\d+(\.\d{1,2})?$/;
-const RE_COMPROBANTE = /^\d{6,12}$/;
+const RE_COMPROBANTE = /^\d{6,14}$/;
 const RE_HASH       = /^[0-9a-f]{64,}$/i;
-const RE_MASCARA    = /^\*{4}\d+$/;
+const RE_MASCARA    = /^\*+\d+$/;
+
+function parsearEpochQR(epochStr: string): Date | undefined {
+  if (!RE_EPOCH_10.test(epochStr) && !RE_EPOCH_13.test(epochStr)) return undefined;
+
+  const valor = parseInt(epochStr, 10);
+  const fecha = RE_EPOCH_13.test(epochStr) ? new Date(valor) : new Date(valor * 1000);
+  const anio = fecha.getUTCFullYear();
+
+  if (anio < 2020 || anio > 2035) return undefined;
+  return fecha;
+}
 
 function parsearDeunaQR(crudo: string): DatosQR | null {
   const tokens = crudo.split(":").map((t) => t.trim());
 
-  // Gate: empieza con ONLINE y el segundo token contiene _TO_
-  if (tokens[0] !== "ONLINE" || !tokens[1]?.includes("_TO_")) return null;
+  // Gate: empieza con ONLINE y al menos 13 tokens, sin depender del tipo exacto.
+  if (tokens[0]?.trim() !== "ONLINE" || tokens.length < 13) return null;
 
   // ── Intento posicional ────────────────────────────────────────────────────
   if (tokens.length >= 13) {
@@ -89,26 +102,25 @@ function parsearDeunaQR(crudo: string): DatosQR | null {
     const uuid        = tokens[10];
     const comprobante = tokens[11];
     const hash        = tokens[12];
+    const fecha = parsearEpochQR(epochStr);
 
     if (
       monto !== null &&
       monto > 0 &&
       RE_MONTO_POS.test(tokens[8]) &&
-      RE_EPOCH_10.test(epochStr) &&
       RE_UUID.test(uuid) &&
       RE_COMPROBANTE.test(comprobante) &&
       RE_HASH.test(hash)
     ) {
-      const epoch = parseInt(epochStr, 10);
       return {
         monto,
         comprobante,
         uuid,
         beneficiario:      tokens[6],
-        cuentaEnmascarada: tokens[7],           // ****XXXX — para detectar sucursal
+        cuentaEnmascarada: tokens[7],           // ***XXXX / ****XXXX — para detectar sucursal
         pagador:           tokens[3],           // nombre (t[4] = cuenta, nunca se propaga)
         banco:             `${tokens[2]} → ${tokens[5]}`,
-        fecha:             new Date(epoch * 1000),
+        fecha,
         confiable: true,
       };
     }
@@ -116,7 +128,7 @@ function parsearDeunaQR(crudo: string): DatosQR | null {
 
   // ── Heurística de rescate (variantes, campos de más/menos) ───────────────
   let monto: number | undefined;
-  let epoch: number | undefined;
+  let epochMs: number | undefined;
   let uuid: string | undefined;
   let comprobante: string | undefined;
   let beneficiario: string | undefined;
@@ -134,14 +146,18 @@ function parsearDeunaQR(crudo: string): DatosQR | null {
       continue;
     }
 
-    // Epoch: 10 dígitos, año entre 2020 y 2035
-    if (RE_EPOCH_10.test(t) && epoch === undefined) {
-      const year = new Date(parseInt(t, 10) * 1000).getUTCFullYear();
-      if (year >= 2020 && year <= 2035) { epoch = parseInt(t, 10); continue; }
+    // Epoch: 10 o 13 dígitos, año entre 2020 y 2035
+    if ((RE_EPOCH_10.test(t) || RE_EPOCH_13.test(t)) && epochMs === undefined) {
+      const fecha = parsearEpochQR(t);
+      if (fecha) {
+        const valor = parseInt(t, 10);
+        epochMs = RE_EPOCH_10.test(t) ? valor * 1000 : valor;
+        continue;
+      }
     }
 
-    // Monto: dígitos con exactamente 2 decimales
-    if (/^\d+\.\d{2}$/.test(t) && monto === undefined) {
+    // Monto: dígitos con 1 o 2 decimales
+    if (/^\d+\.\d{1,2}$/.test(t) && monto === undefined) {
       const m = normalizarDecimal(t);
       if (m && m > 0) { monto = m; continue; }
     }
@@ -162,7 +178,7 @@ function parsearDeunaQR(crudo: string): DatosQR | null {
       cuentaEnmascarada,
       pagador: tokens[3] ?? undefined,
       banco: tokens[2] && tokens[5] ? `${tokens[2]} → ${tokens[5]}` : undefined,
-      fecha: epoch !== undefined ? new Date(epoch * 1000) : undefined,
+      fecha: epochMs !== undefined ? new Date(epochMs) : undefined,
       confiable: true,
     };
   }
