@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { parsearQRSync, detectarSucursal } from "@/lib/transferencias-qr";
 import { normalizarDecimal } from "@/lib/decimales";
 import { registrarTransferenciaQR } from "./actions";
@@ -21,6 +22,16 @@ type Confirmacion = {
 
 type Toast = { tipo: "ok" | "warn"; texto: string };
 
+type DetectorLike = {
+  detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue: string }>>;
+};
+
+declare global {
+  interface Window {
+    BarcodeDetector?: new (options: { formats: string[] }) => DetectorLike;
+  }
+}
+
 function hoyEC(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guayaquil" }).format(new Date());
 }
@@ -37,6 +48,8 @@ export function EscanerQR({
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
   const throttleRef = useRef<number>(0);
+  const detectorRef = useRef<DetectorLike | null>(null);
+  const [montado, setMontado] = useState(false);
 
   const [permisoDenegado, setPermisoDenegado] = useState(false);
   const [escaneando, setEscaneando] = useState(false);
@@ -54,30 +67,28 @@ export function EscanerQR({
     setTimeout(() => setToast(null), 3500);
   }, []);
 
+  useEffect(() => {
+    setMontado(true);
+    return () => setMontado(false);
+  }, []);
+
   const detenerCamara = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
     }
     setEscaneando(false);
   }, []);
 
   const iniciarCamara = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setPermisoDenegado(false);
-      setEscaneando(true);
-    } catch {
-      setPermisoDenegado(true);
-    }
+    setPermisoDenegado(false);
+    setEscaneando(true);
   }, []);
 
   const procesarTexto = useCallback(
@@ -126,6 +137,55 @@ export function EscanerQR({
     [detenerCamara, sucursales, sucursalDefaultId]
   );
 
+  // Conectar la cámara solo cuando la vista ya está montada
+  useEffect(() => {
+    if (!escaneando) return;
+
+    let activo = true;
+
+    const arrancarCamara = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
+
+        if (!activo) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play().catch(() => {});
+        }
+        setPermisoDenegado(false);
+        setEscaneando(true);
+      } catch {
+        if (!activo) return;
+        setPermisoDenegado(true);
+        setEscaneando(false);
+      }
+    };
+
+    arrancarCamara();
+
+    return () => {
+      activo = false;
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      }
+    };
+  }, [escaneando]);
+
   // Loop de detección
   useEffect(() => {
     if (!escaneando) return;
@@ -136,10 +196,15 @@ export function EscanerQR({
     async function cargarJsQR() {
       if (!("BarcodeDetector" in window)) {
         const mod = await import("jsqr");
-        jsQRLib = mod.default;
+        jsQRLib = mod.default as unknown as (data: Uint8ClampedArray, w: number, h: number) => { data: string } | null;
       }
     }
+
     cargarJsQR();
+
+    if (typeof window !== "undefined" && "BarcodeDetector" in window) {
+      detectorRef.current = new window.BarcodeDetector!({ formats: ["qr_code"] });
+    }
 
     const tick = () => {
       if (cancelado) return;
@@ -155,15 +220,16 @@ export function EscanerQR({
 
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
       ctx.drawImage(video, 0, 0);
 
-      if ("BarcodeDetector" in window) {
-        const detector = new (window as unknown as { BarcodeDetector: new (opts: object) => { detect: (el: HTMLVideoElement) => Promise<Array<{ rawValue: string }>> } }).BarcodeDetector({ formats: ["qr_code"] });
-        detector.detect(video).then((results) => {
+      if (detectorRef.current) {
+        detectorRef.current.detect(video).then((results) => {
           if (results[0]?.rawValue) procesarTexto(results[0].rawValue);
-        }).catch(() => {/* nada */});
+        }).catch(() => {
+          // nada
+        });
       } else if (jsQRLib) {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const resultado = jsQRLib(imageData.data, imageData.width, imageData.height);
@@ -175,6 +241,8 @@ export function EscanerQR({
     return () => {
       cancelado = true;
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      detectorRef.current = null;
     };
   }, [escaneando, procesarTexto]);
 
@@ -241,20 +309,22 @@ export function EscanerQR({
     iniciarCamara();
   }
 
+  const toastNode = toast ? (
+    <div
+      className={`fixed top-4 left-1/2 z-[60] -translate-x-1/2 rounded-xl px-4 py-3 text-sm font-semibold shadow-lg ${
+        toast.tipo === "ok" ? "bg-cuadre-ok text-white" : "bg-amber-500 text-white"
+      }`}
+    >
+      {toast.texto}
+    </div>
+  ) : null;
+
+  const portalTarget = montado && typeof document !== "undefined" ? document.body : null;
+
   // ── Render: pantalla inicial ───────────────────────────────────────────────
   if (!escaneando && !confirmacion) {
-    return (
+    const contenido = (
       <>
-        {toast && (
-          <div
-            className={`fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-xl px-4 py-3 text-sm font-semibold shadow-lg ${
-              toast.tipo === "ok" ? "bg-cuadre-ok text-white" : "bg-amber-500 text-white"
-            }`}
-          >
-            {toast.texto}
-          </div>
-        )}
-
         {permisoDenegado ? (
           <div className="rounded-panel border border-masa-200 bg-white p-6 text-center">
             <p className="text-corteza-700 font-semibold">Permiso de cámara denegado</p>
@@ -293,12 +363,19 @@ export function EscanerQR({
         )}
       </>
     );
+
+    return (
+      <>
+        {portalTarget ? createPortal(toastNode, portalTarget) : toastNode}
+        {contenido}
+      </>
+    );
   }
 
   // ── Render: cámara activa ─────────────────────────────────────────────────
   if (escaneando) {
-    return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col">
+    const contenido = (
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
         <div className="flex items-center justify-between p-4">
           <p className="text-white font-semibold">Apunta al código QR</p>
           <button
@@ -315,7 +392,7 @@ export function EscanerQR({
 
         <div className="relative flex-1 flex items-center justify-center">
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video ref={videoRef} playsInline className="h-full w-full object-cover" />
+          <video ref={videoRef} muted autoPlay playsInline className="h-full w-full object-cover" />
           <canvas ref={canvasRef} className="hidden" />
           {/* Recuadro guía */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -330,21 +407,18 @@ export function EscanerQR({
         </div>
       </div>
     );
+
+    return (
+      <>
+        {portalTarget ? createPortal(toastNode, portalTarget) : toastNode}
+        {portalTarget ? createPortal(contenido, portalTarget) : contenido}
+      </>
+    );
   }
 
   // ── Render: tarjeta de confirmación ──────────────────────────────────────
-  return (
-    <div className="fixed inset-0 z-50 bg-corteza-900/80 flex items-end sm:items-center justify-center p-4">
-      {toast && (
-        <div
-          className={`fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-xl px-4 py-3 text-sm font-semibold shadow-lg ${
-            toast.tipo === "ok" ? "bg-cuadre-ok text-white" : "bg-amber-500 text-white"
-          }`}
-        >
-          {toast.texto}
-        </div>
-      )}
-
+  const contenidoConfirmacion = (
+    <div className="fixed inset-0 z-[60] bg-corteza-900/80 flex items-end sm:items-center justify-center p-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-5 space-y-4 shadow-2xl">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-corteza-900">Confirmar transferencia</h3>
@@ -497,5 +571,12 @@ export function EscanerQR({
         )}
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {portalTarget ? createPortal(toastNode, portalTarget) : toastNode}
+      {portalTarget ? createPortal(contenidoConfirmacion, portalTarget) : contenidoConfirmacion}
+    </>
   );
 }

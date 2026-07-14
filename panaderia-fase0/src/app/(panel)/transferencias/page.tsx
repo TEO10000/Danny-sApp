@@ -152,10 +152,10 @@ export default async function TransferenciasPage({
       <ListaTransferencias filas={filas} esAdmin={esAdmin} />
 
       {/* Espaciado para el botón fijo inferior */}
-      <div className="h-24" />
+      <div className="h-28" />
 
       {/* Botón de escaneo fijo al fondo — grande, al alcance del pulgar */}
-      <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 w-full max-w-xs px-4">
+      <div className="fixed inset-x-0 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-40 mx-auto w-full max-w-xs px-4">
         <EscanerQR sucursales={sucursales} sucursalDefaultId={sucursalDefaultId} />
       </div>
     </div>
