@@ -14,9 +14,9 @@ type Confirmacion = {
   pagador: string;
   beneficiario: string;
   sucursalId: string;
-  horaISO: string;
+  uuid: string;              // UUID Deuna para idempotencia (vacío si no hay)
   fechaFueraDeHoy: boolean;
-  esFechaExterna: boolean; // si la fecha vino del QR (no del reloj local)
+  esFechaExterna: boolean;   // si la fecha vino del QR (para el aviso)
 };
 
 type Toast = { tipo: "ok" | "warn"; texto: string };
@@ -88,26 +88,24 @@ export function EscanerQR({
       const datos = parsearQRSync(texto);
       const hoy = hoyEC();
       let fechaFueraDeHoy = false;
-      let horaISO = new Date().toISOString();
       let esFechaExterna = false;
 
+      // datos.fecha = epoch del QR, SOLO para el aviso "no es de hoy"
+      // La hora guardada en BD es siempre new Date() (momento del escaneo)
       if (datos.fecha) {
         const fechaQR = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guayaquil" }).format(
           datos.fecha
         );
         fechaFueraDeHoy = fechaQR !== hoy;
-        horaISO = datos.fecha.toISOString();
         esFechaExterna = true;
       }
 
-      // Autodetectar sucursal por beneficiario
+      // Autodetectar sucursal: primero por cuenta enmascarada, luego por nombre
       let sucursalId = sucursalDefaultId ?? sucursales[0]?.id ?? "";
-      if (datos.beneficiario) {
-        const detectada = detectarSucursal(datos.beneficiario);
-        if (detectada) {
-          const s = sucursales.find((s) => s.nombre === detectada);
-          if (s) sucursalId = s.id;
-        }
+      const detectada = detectarSucursal(datos.beneficiario, datos.cuentaEnmascarada);
+      if (detectada) {
+        const s = sucursales.find((s) => s.nombre === detectada);
+        if (s) sucursalId = s.id;
       }
 
       setCrudo(texto);
@@ -120,7 +118,7 @@ export function EscanerQR({
         pagador: datos.pagador ?? "",
         beneficiario: datos.beneficiario ?? "",
         sucursalId,
-        horaISO,
+        uuid: datos.uuid ?? "",
         fechaFueraDeHoy,
         esFechaExterna,
       });
@@ -207,9 +205,9 @@ export function EscanerQR({
         monto,
         crudo: confirmacion.crudo,
         comprobante: confirmacion.comprobante || undefined,
+        uuid: confirmacion.uuid || undefined,
         pagador: confirmacion.pagador || undefined,
         beneficiario: confirmacion.beneficiario || undefined,
-        horaISO: confirmacion.horaISO,
       });
 
       if ("duplicada" in resultado && resultado.duplicada) {

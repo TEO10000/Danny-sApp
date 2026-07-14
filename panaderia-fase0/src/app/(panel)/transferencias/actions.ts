@@ -16,9 +16,9 @@ const esquemaRegistro = z.object({
   monto: zMonto,
   crudo: z.string().min(1),
   comprobante: z.string().optional(),
+  uuid: z.string().optional(),      // UUID del comprobante Deuna — prioridad máxima para idempotencia
   pagador: z.string().optional(),
   beneficiario: z.string().optional(),
-  horaISO: z.string().optional(),
 });
 
 export type ResultadoRegistro =
@@ -42,13 +42,13 @@ export async function registrarTransferenciaQR(
     return { ok: false, error: msg };
   }
 
-  const { sucursalId, monto, crudo, comprobante, pagador, beneficiario, horaISO } = parsed.data;
+  const { sucursalId, monto, crudo, comprobante, uuid, pagador, beneficiario } = parsed.data;
 
   const sucursal = await prisma.sucursal.findUnique({ where: { id: sucursalId } });
   if (!sucursal) return { ok: false, error: "Sucursal no encontrada" };
 
-  // Clave de idempotencia: comprobante si existe, hash corto del crudo si no
-  const messageId = `qr:${comprobante ?? hashCorto(crudo)}`;
+  // Idempotencia: UUID > comprobante > hash corto del crudo
+  const messageId = `qr:${uuid ?? comprobante ?? hashCorto(crudo)}`;
 
   const existente = await prisma.transferenciaTurno.findUnique({
     where: { messageId },
@@ -64,12 +64,8 @@ export async function registrarTransferenciaQR(
     return { duplicada: true, hora };
   }
 
-  let hora: Date = new Date();
-  if (horaISO) {
-    const candidata = new Date(horaISO);
-    if (!isNaN(candidata.getTime())) hora = candidata;
-  }
-
+  // La hora guardada es siempre el momento del escaneo (cae en la franja del turno activo)
+  const hora = new Date();
   const montoRedondeado = Math.round(monto * 100) / 100;
 
   await prisma.transferenciaTurno.create({
