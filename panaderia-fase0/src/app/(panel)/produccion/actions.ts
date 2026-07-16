@@ -9,6 +9,7 @@ import { Prisma } from "@prisma/client";
 import { hoyEcuador } from "@/lib/cierres";
 import { recalcularCierre, cierreQueContieneTimestamp } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { preciosVigentesEn } from "@/lib/catalogo";
 
 const detalleSchema = z.object({
   productoId: z.string().min(1, "Elige el pan de cada fila."),
@@ -30,6 +31,68 @@ const cocheSchema = z.object({
 });
 
 export type EstadoCoche = { ok: boolean; mensaje: string } | null;
+
+export async function obtenerDetalleCoche(cocheId: string) {
+  const session = await auth();
+  if (!session?.user) throw new Error("No autorizado.");
+
+  const coche = await prisma.cocheProduccion.findUniqueOrThrow({
+    where: { id: cocheId },
+    include: {
+      sucursal: { select: { nombre: true } },
+      panadero: { select: { nombre: true } },
+      detalles: {
+        include: { producto: { select: { nombre: true } } },
+      },
+    },
+  });
+
+  const detalles = coche.detalles.map((detalle) => {
+    const subtotal = detalle.numLatas * detalle.panesPorLata;
+    const buenos = Math.max(subtotal - detalle.mermas, 0);
+    return {
+      productoId: detalle.productoId,
+      producto: { nombre: detalle.producto.nombre },
+      numLatas: detalle.numLatas,
+      panesPorLata: detalle.panesPorLata,
+      mermas: detalle.mermas,
+      subtotal,
+      buenos,
+    };
+  });
+
+  const latasTotales = detalles.reduce((s, d) => s + d.numLatas, 0);
+  const panesTotales = detalles.reduce((s, d) => s + d.subtotal, 0);
+  const mermasTotales = detalles.reduce((s, d) => s + d.mermas, 0);
+
+  const puedeEditar =
+    session.user.rol === "ADMIN" ||
+    (session.user.rol === "PANADERO" && coche.panaderoId === session.user.id);
+
+  const base = {
+    id: coche.id,
+    fecha: coche.fecha.toISOString(),
+    sucursal: { nombre: coche.sucursal.nombre },
+    panadero: { nombre: coche.panadero.nombre },
+    notas: coche.notas,
+    detalles,
+    latasTotales,
+    panesTotales,
+    mermasTotales,
+    puedeEditar,
+  };
+
+  if (session.user.rol === "ADMIN") {
+    const precios = await preciosVigentesEn(coche.fecha);
+    const ingresoEstimado = detalles.reduce((s, detalle) => {
+      const precio = precios.get(detalle.productoId) ?? 0;
+      return s + detalle.buenos * precio;
+    }, 0);
+    return { ...base, ingresoEstimado: Math.round(ingresoEstimado * 100) / 100 };
+  }
+
+  return base;
+}
 
 export async function registrarCoche(
   _prev: EstadoCoche,

@@ -9,7 +9,7 @@ export const RUTA_POR_ROL: Record<string, string> = {
 // Qué roles pueden entrar a cada sección
 const PERMISOS: Array<{ prefijo: string; roles: string[] }> = [
   { prefijo: "/dashboard", roles: ["ADMIN"] },
-  { prefijo: "/catalogo", roles: ["ADMIN"] },
+  { prefijo: "/catalogo", roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { prefijo: "/precios", roles: ["ADMIN", "PANADERO", "ATENCION_CLIENTE"] },
   { prefijo: "/produccion", roles: ["ADMIN", "PANADERO"] },
   { prefijo: "/caja", roles: ["ADMIN", "ATENCION_CLIENTE"] },

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { preciosVigentesEn, dinero } from "@/lib/catalogo";
 import { hoyEcuador } from "@/lib/cierres";
+import ListaCoches from "./ListaCoches";
 
 export const dynamic = "force-dynamic";
 
@@ -120,42 +121,7 @@ export default async function ProduccionPage({
           con el botón de arriba: sucursal, latas y panes por lata.
         </section>
       ) : (
-        <ul className="space-y-3">
-          {resumen.map(({ coche, latas, panes, mermas, ingreso, puedeEditar }) => (
-            <li key={coche.id} className="rounded-panel border border-masa-200 bg-white p-4">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-bold text-corteza-900">
-                    {fmtFecha.format(coche.fecha)} · {coche.sucursal.nombre}
-                  </p>
-                  <p className="mt-1 text-sm text-corteza-600">
-                    {coche.detalles
-                      .map((d) => `${d.producto.nombre} (${d.numLatas}×${d.panesPorLata})`)
-                      .join(" · ")}
-                  </p>
-                  <p className="mt-1 text-sm text-corteza-400">
-                    {latas} latas · {panes} panes
-                    {mermas > 0 ? ` · ${mermas} mermas` : ""} · {coche.panadero.nombre}
-                    {coche.notas ? ` · "${coche.notas}"` : ""}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  {ingreso !== null && (
-                    <p className="font-bold text-cuadre-ok">{dinero(ingreso)} est.</p>
-                  )}
-                  {puedeEditar && (
-                    <Link
-                      href={`/produccion/${coche.id}/editar`}
-                      className="rounded-lg border border-masa-200 px-3 py-1.5 text-sm font-semibold text-corteza-600 hover:bg-masa-100"
-                    >
-                      Editar
-                    </Link>
-                  )}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <ListaCoches resumen={resumen} />
       )}
     </div>
   );

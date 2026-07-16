@@ -8,12 +8,13 @@ import { Prisma } from "@prisma/client";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { zMonto } from "@/lib/decimales";
 
-async function exigirAdmin() {
+async function exigirPermisoCatalogo() {
   const session = await auth();
-  if (session?.user?.rol !== "ADMIN") {
-    throw new Error("Solo el administrador puede modificar el catálogo.");
+  const rol = session?.user?.rol;
+  if (rol !== "ADMIN" && rol !== "ATENCION_CLIENTE") {
+    throw new Error("No tienes permiso para modificar el catálogo.");
   }
-  return session.user;
+  return session!.user;
 }
 
 const CATEGORIAS_ENUM = z.enum(["PAN_SAL", "PAN_DULCE", "PASTELERIA", "GALLETERIA", "EMPAQUETADO"]);
@@ -35,7 +36,7 @@ export async function crearProducto(
   _prev: EstadoAccion,
   formData: FormData
 ): Promise<EstadoAccion> {
-  await exigirAdmin();
+  await exigirPermisoCatalogo();
 
   const parsed = productoSchema.safeParse({
     nombre: formData.get("nombre"),
@@ -74,7 +75,7 @@ export async function actualizarPrecio(
   _prev: EstadoAccion,
   formData: FormData
 ): Promise<EstadoAccion> {
-  await exigirAdmin();
+  await exigirPermisoCatalogo();
 
   const parsed = precioSchema.safeParse({
     productoId: formData.get("productoId"),
@@ -96,7 +97,7 @@ export async function actualizarPrecio(
 }
 
 export async function cambiarActivo(formData: FormData): Promise<void> {
-  await exigirAdmin();
+  await exigirPermisoCatalogo();
   const id = String(formData.get("productoId") ?? "");
   const activo = String(formData.get("activo")) === "true";
   if (!id) return;
@@ -116,7 +117,7 @@ export async function editarProducto(
   _prev: EstadoAccion,
   formData: FormData
 ): Promise<EstadoAccion> {
-  const admin = await exigirAdmin();
+  const user = await exigirPermisoCatalogo();
 
   const parsed = editarProductoSchema.safeParse({
     productoId: formData.get("productoId"),
@@ -158,7 +159,7 @@ export async function editarProducto(
         entidadId: productoId,
         accion: "EDITAR",
         cambios,
-        userId: admin.id!,
+        userId: user.id!,
       });
     });
   } catch (err) {

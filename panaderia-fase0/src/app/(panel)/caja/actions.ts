@@ -11,6 +11,7 @@ import { ventanaTurno } from "@/lib/cierres";
 import { recalcularCierre, cierreSiguiente } from "@/lib/recalculo";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { normalizarDecimal } from "@/lib/decimales";
+import { preciosVigentesEn } from "@/lib/catalogo";
 
 const zEfectivo = z.preprocess(
   (v) => normalizarDecimal(typeof v === "string" || typeof v === "number" ? v : String(v ?? "")) ?? 0,
@@ -51,6 +52,96 @@ const cierreSchema = z.object({
 });
 
 export type EstadoCierre = { ok: boolean; mensaje: string } | null;
+
+export async function obtenerDetalleCierre(cierreId: string) {
+  const session = await auth();
+  if (!session?.user || !["ADMIN", "ATENCION_CLIENTE"].includes(session.user.rol ?? "")) {
+    throw new Error("No autorizado.");
+  }
+
+  const cierre = await prisma.cierreTurno.findUniqueOrThrow({
+    where: { id: cierreId },
+    include: {
+      sucursal: { select: { nombre: true } },
+      empleada: { select: { nombre: true } },
+      sobrantes: { include: { producto: { select: { nombre: true } } } },
+      facturas: {
+        select: {
+          montoTotal: true,
+          estado: true,
+          origenPago: true,
+          proveedor: { select: { nombre: true } },
+        },
+      },
+      transferencias: {
+        where: { estado: "CONFIRMADA" },
+        select: {
+          monto: true,
+          referencia: true,
+          remitente: true,
+          hora: true,
+          estado: true,
+        },
+      },
+    },
+  });
+
+  const fechaStr = strDeFechaDia(cierre.fecha);
+  const tipo = cierre.tipoTurno as TipoTurno;
+  const finVentana = finDeTurno(fechaStr, tipo);
+  const precios = await preciosVigentesEn(finVentana);
+  const datos = await datosParaCierre(cierre.sucursalId, fechaStr, tipo, { preciosPorProducto: precios });
+
+  const sobrantePor = new Map(cierre.sobrantes.map((s) => [s.productoId, s.cantidadSobrante]));
+  const filas = datos.filas.map((fila) => {
+    const sobrante = sobrantePor.get(fila.productoId) ?? 0;
+    const vendidos = fila.disponible - sobrante;
+    return {
+      productoId: fila.productoId,
+      nombre: fila.nombre,
+      anterior: fila.anterior,
+      producido: fila.producido,
+      disponible: fila.disponible,
+      sobrante,
+      vendidos,
+      precio: fila.precio,
+      valor: Math.round(vendidos * fila.precio * 100) / 100,
+    };
+  });
+
+  return {
+    id: cierre.id,
+    fecha: cierre.fecha.toISOString(),
+    tipoTurno: cierre.tipoTurno,
+    sucursal: { nombre: cierre.sucursal.nombre },
+    empleada: { nombre: cierre.empleada.nombre },
+    fondoInicial: Number(cierre.fondoInicial),
+    efectivoEsperado: Number(cierre.efectivoEsperado),
+    efectivoContado: Number(cierre.efectivoContado),
+    descuadre: Number(cierre.descuadre),
+    totalTransferencias: Number(cierre.totalTransferencias),
+    notas: cierre.notas,
+    filas,
+    facturas: cierre.facturas.map((factura) => ({
+      proveedor: { nombre: factura.proveedor.nombre },
+      monto: Number(factura.montoTotal),
+      estado: factura.estado,
+      origenPago: factura.origenPago,
+    })),
+    transferencias: cierre.transferencias.map((transferencia) => ({
+      monto: Number(transferencia.monto),
+      referencia: transferencia.referencia,
+      remitente: transferencia.remitente,
+      hora: transferencia.hora ? transferencia.hora.toISOString() : null,
+      estado: transferencia.estado,
+    })),
+    sobrantes: cierre.sobrantes.map((s) => ({
+      producto: { nombre: s.producto.nombre },
+      cantidadSobrante: s.cantidadSobrante,
+    })),
+    esAdmin: session.user.rol === "ADMIN",
+  };
+}
 
 export async function registrarCierre(
   _prev: EstadoCierre,
