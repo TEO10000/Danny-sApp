@@ -65,6 +65,8 @@ export default async function CatalogoPage() {
                       productoId={p.id}
                       nombreActual={p.nombre}
                       categoriaActual={p.categoria}
+                      modoActual={p.modoProduccion}
+                      vidaUtilActual={p.vidaUtilHoras}
                     />
                     <FormPrecio productoId={p.id} precioActual={p.precioVigente} />
                     <form action={cambiarActivo}>

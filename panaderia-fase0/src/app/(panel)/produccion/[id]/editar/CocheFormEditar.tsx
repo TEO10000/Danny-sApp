@@ -5,15 +5,17 @@ import { useFormState, useFormStatus } from "react-dom";
 import { editarCoche, type EstadoCoche } from "../../actions";
 import { SelectorBuscador } from "@/components/SelectorBuscador";
 
-type ProductoOpcion = { id: string; nombre: string; precio: number | null };
+type ProductoOpcion = { id: string; nombre: string; precio: number | null; modoProduccion?: "LATAS" | "UNIDADES" };
 type Sucursal = { id: string; nombre: string };
-type FilaInicial = { productoId: string; numLatas: number; panesPorLata: number; mermas: number };
+type FilaInicial = { productoId: string; modo?: "LATAS" | "UNIDADES"; numLatas?: number | null; panesPorLata?: number | null; cantidadUnidades?: number | null; mermas: number };
 
 type Fila = {
   clave: number;
   productoId: string;
+  modo: "LATAS" | "UNIDADES";
   numLatas: string;
   panesPorLata: string;
+  cantidadUnidades: string;
   mermas: string;
 };
 
@@ -24,8 +26,10 @@ function filaDeInicial(d: FilaInicial, clave: number): Fila {
   return {
     clave,
     productoId: d.productoId,
-    numLatas: String(d.numLatas),
-    panesPorLata: String(d.panesPorLata),
+    modo: d.modo ?? "LATAS",
+    numLatas: String(d.numLatas ?? ""),
+    panesPorLata: String(d.panesPorLata ?? ""),
+    cantidadUnidades: String(d.cantidadUnidades ?? ""),
     mermas: String(d.mermas),
   };
 }
@@ -76,27 +80,43 @@ export function CocheFormEditar({
   const totales = useMemo(() => {
     let latas = 0, panes = 0, mermas = 0, ingreso = 0;
     for (const f of filas) {
+      const producto = productos.find((p) => p.id === f.productoId);
+      const modo = producto?.modoProduccion ?? f.modo;
       const nl = parseInt(f.numLatas, 10) || 0;
       const ppl = parseInt(f.panesPorLata, 10) || 0;
+      const unidades = parseInt(f.cantidadUnidades, 10) || 0;
       const m = parseInt(f.mermas, 10) || 0;
-      const buenos = Math.max(nl * ppl - m, 0);
-      latas += nl; panes += nl * ppl; mermas += m;
-      const precio = productos.find((p) => p.id === f.productoId)?.precio ?? 0;
+      const producidas = modo === "UNIDADES" ? unidades : nl * ppl;
+      const buenos = Math.max(producidas - m, 0);
+      latas += modo === "LATAS" ? nl : 0; panes += producidas; mermas += m;
+      const precio = producto?.precio ?? 0;
       ingreso += buenos * (precio ?? 0);
     }
     return { latas, panes, mermas, ingreso };
   }, [filas, productos]);
 
-  const filasCompletas = filas.filter(
-    (f) => f.productoId && parseInt(f.numLatas, 10) > 0 && parseInt(f.panesPorLata, 10) > 0
-  );
+  const filasCompletas = filas.filter((f) => {
+    if (!f.productoId) return false;
+    const producto = productos.find((p) => p.id === f.productoId);
+    const modo = producto?.modoProduccion ?? f.modo;
+    if (modo === "UNIDADES") {
+      return parseInt(f.cantidadUnidades, 10) > 0;
+    }
+    return parseInt(f.numLatas, 10) > 0 && parseInt(f.panesPorLata, 10) > 0;
+  });
   const detallesJson = JSON.stringify(
-    filasCompletas.map((f) => ({
-      productoId: f.productoId,
-      numLatas: parseInt(f.numLatas, 10),
-      panesPorLata: parseInt(f.panesPorLata, 10),
-      mermas: parseInt(f.mermas, 10) || 0,
-    }))
+    filasCompletas.map((f) => {
+      const producto = productos.find((p) => p.id === f.productoId);
+      const modo = producto?.modoProduccion ?? f.modo;
+      return {
+        productoId: f.productoId,
+        modo,
+        numLatas: parseInt(f.numLatas, 10) || 1,
+        panesPorLata: parseInt(f.panesPorLata, 10) || 1,
+        cantidadUnidades: parseInt(f.cantidadUnidades, 10) || 1,
+        mermas: parseInt(f.mermas, 10) || 0,
+      };
+    })
   );
 
   return (
@@ -136,10 +156,14 @@ export function CocheFormEditar({
 
       <section className="space-y-3">
         {filas.map((f, i) => {
+          const producto = productos.find((p) => p.id === f.productoId);
+          const modo = producto?.modoProduccion ?? f.modo;
           const nl = parseInt(f.numLatas, 10) || 0;
           const ppl = parseInt(f.panesPorLata, 10) || 0;
+          const unidades = parseInt(f.cantidadUnidades, 10) || 0;
           const m = parseInt(f.mermas, 10) || 0;
-          const buenos = Math.max(nl * ppl - m, 0);
+          const producidas = modo === "UNIDADES" ? unidades : nl * ppl;
+          const buenos = Math.max(producidas - m, 0);
           return (
             <div key={f.clave} className="rounded-panel border border-masa-200 bg-white p-4">
               <div className="flex items-center justify-between">
@@ -163,33 +187,59 @@ export function CocheFormEditar({
                       }))}
                       valorInicial={f.productoId}
                       placeholder="Buscar producto…"
-                      onSeleccion={(id) => editar(f.clave, "productoId", id)}
+                      onSeleccion={(id) => {
+                        const producto = productos.find((p) => p.id === id);
+                        editar(f.clave, "productoId", id);
+                        if (producto?.modoProduccion) {
+                          setFilas((fs) => fs.map((x) => (x.clave === f.clave ? { ...x, modo: producto.modoProduccion as Fila["modo"] } : x)));
+                        }
+                      }}
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-corteza-600">Latas</label>
-                  <input type="number" inputMode="numeric" min="1" value={f.numLatas} onChange={(e) => editar(f.clave, "numLatas", e.target.value)} className={`mt-1 ${inputCls}`} placeholder="14" />
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-semibold text-corteza-600">Modo</label>
+                  <select
+                    value={modo}
+                    onChange={(e) => setFilas((fs) => fs.map((x) => (x.clave === f.clave ? { ...x, modo: e.target.value as Fila["modo"] } : x)))}
+                    className={`mt-1 ${inputCls}`}
+                  >
+                    <option value="LATAS">Latas</option>
+                    <option value="UNIDADES">Unidades</option>
+                  </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-corteza-600">Panes/lata</label>
-                  <input type="number" inputMode="numeric" min="1" value={f.panesPorLata} onChange={(e) => editar(f.clave, "panesPorLata", e.target.value)} className={`mt-1 ${inputCls}`} placeholder="20" />
-                </div>
+                {modo === "LATAS" ? (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-corteza-600">Latas</label>
+                      <input type="number" inputMode="numeric" min="1" value={f.numLatas} onChange={(e) => editar(f.clave, "numLatas", e.target.value)} className={`mt-1 ${inputCls}`} placeholder="14" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-corteza-600">Panes/lata</label>
+                      <input type="number" inputMode="numeric" min="1" value={f.panesPorLata} onChange={(e) => editar(f.clave, "panesPorLata", e.target.value)} className={`mt-1 ${inputCls}`} placeholder="20" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-corteza-600">Unidades</label>
+                    <input type="number" inputMode="numeric" min="1" value={f.cantidadUnidades} onChange={(e) => editar(f.clave, "cantidadUnidades", e.target.value)} className={`mt-1 ${inputCls}`} placeholder="120" />
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-corteza-600">Mermas</label>
                   <input type="number" inputMode="numeric" min="0" value={f.mermas} onChange={(e) => editar(f.clave, "mermas", e.target.value)} className={`mt-1 ${inputCls}`} />
                 </div>
               </div>
-              {nl > 0 && ppl > 0 && (
+              {((modo === "LATAS" && nl > 0 && ppl > 0) || (modo === "UNIDADES" && unidades > 0)) && (
                 <p className="mt-2 text-sm text-corteza-600">
-                  {nl} latas × {ppl} = <strong>{nl * ppl} panes</strong>
+                  {modo === "LATAS" ? <>{nl} latas × {ppl} = <strong>{nl * ppl} panes</strong></> : `${unidades} unidades`}
                   {m > 0 ? ` (${buenos} buenos tras ${m} de merma)` : ""}
                 </p>
               )}
             </div>
           );
         })}
-        <button type="button" onClick={() => setFilas((fs) => [...fs, { clave: Date.now(), productoId: "", numLatas: "", panesPorLata: "", mermas: "0" }])} className="w-full rounded-panel border-2 border-dashed border-masa-200 px-4 py-3 font-semibold text-corteza-600 hover:border-horno-400 hover:text-horno-600">
+        <button type="button" onClick={() => setFilas((fs) => [...fs, { clave: Date.now(), productoId: "", modo: "LATAS", numLatas: "", panesPorLata: "", cantidadUnidades: "", mermas: "0" }])} className="w-full rounded-panel border-2 border-dashed border-masa-200 px-4 py-3 font-semibold text-corteza-600 hover:border-horno-400 hover:text-horno-600">
           + Agregar otro pan al coche
         </button>
       </section>

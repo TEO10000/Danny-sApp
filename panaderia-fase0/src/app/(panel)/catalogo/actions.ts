@@ -28,6 +28,8 @@ const productoSchema = z.object({
     .trim()
     .transform((v) => (v === "" ? null : v))
     .nullable(),
+  modoProduccion: z.enum(["LATAS", "UNIDADES"]).default("LATAS"),
+  vidaUtilHoras: z.coerce.number().int().min(1).nullable().optional(),
 });
 
 export type EstadoAccion = { ok: boolean; mensaje: string } | null;
@@ -43,6 +45,8 @@ export async function crearProducto(
     categoria: formData.get("categoria"),
     precio: formData.get("precio"),
     codigoBarras: formData.get("codigoBarras") ?? "",
+    modoProduccion: formData.get("modoProduccion") ?? "LATAS",
+    vidaUtilHoras: formData.get("vidaUtilHoras") || null,
   });
   if (!parsed.success) {
     return { ok: false, mensaje: parsed.error.errors[0].message };
@@ -54,6 +58,8 @@ export async function crearProducto(
         nombre: parsed.data.nombre,
         categoria: parsed.data.categoria,
         codigoBarras: parsed.data.codigoBarras,
+        modoProduccion: parsed.data.modoProduccion,
+        vidaUtilHoras: parsed.data.vidaUtilHoras ?? null,
         precios: { create: { precio: parsed.data.precio } },
       },
     });
@@ -111,6 +117,8 @@ const editarProductoSchema = z.object({
   productoId: z.string().min(1, "ID de producto inválido."),
   nombre: z.string().trim().min(2, "El nombre debe tener al menos 2 caracteres."),
   categoria: CATEGORIAS_ENUM,
+  modoProduccion: z.enum(["LATAS", "UNIDADES"]).default("LATAS"),
+  vidaUtilHoras: z.coerce.number().int().min(1).nullable().optional(),
 });
 
 export async function editarProducto(
@@ -123,11 +131,13 @@ export async function editarProducto(
     productoId: formData.get("productoId"),
     nombre: formData.get("nombre"),
     categoria: formData.get("categoria"),
+    modoProduccion: formData.get("modoProduccion") ?? "LATAS",
+    vidaUtilHoras: formData.get("vidaUtilHoras") || null,
   });
   if (!parsed.success) {
     return { ok: false, mensaje: parsed.error.errors[0].message };
   }
-  const { productoId, nombre, categoria } = parsed.data;
+  const { productoId, nombre, categoria, modoProduccion, vidaUtilHoras } = parsed.data;
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -149,10 +159,18 @@ export async function editarProducto(
       if (actual.categoria !== categoria) {
         cambios.push({ campo: "categoria", valorAnterior: actual.categoria, valorNuevo: categoria });
       }
+      if (actual.modoProduccion !== modoProduccion) {
+        cambios.push({ campo: "modoProduccion", valorAnterior: actual.modoProduccion, valorNuevo: modoProduccion });
+      }
+      const vidaAnterior = actual.vidaUtilHoras?.toString() ?? "(vacío)";
+      const vidaNueva = vidaUtilHoras?.toString() ?? "(vacío)";
+      if (vidaAnterior !== vidaNueva) {
+        cambios.push({ campo: "vidaUtilHoras", valorAnterior: vidaAnterior, valorNuevo: vidaNueva });
+      }
 
       if (cambios.length === 0) return; // nada cambió
 
-      await tx.producto.update({ where: { id: productoId }, data: { nombre, categoria } });
+      await tx.producto.update({ where: { id: productoId }, data: { nombre, categoria, modoProduccion, vidaUtilHoras: vidaUtilHoras ?? null } });
 
       await registrarAuditoria(tx, {
         entidad: "Producto",

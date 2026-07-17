@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { preciosVigentesEn, dinero } from "@/lib/catalogo";
 import { hoyEcuador } from "@/lib/cierres";
 import ListaCoches from "./ListaCoches";
+import { unidadesBuenas } from "@/lib/produccion-calculo";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +48,9 @@ export default async function ProduccionPage({
     panadero: { nombre: string };
     detalles: Array<{
       productoId: string;
-      numLatas: number;
-      panesPorLata: number;
+      numLatas: number | null;
+      panesPorLata: number | null;
+      cantidadUnidades: number | null;
       mermas: number;
       producto: { nombre: string };
     }>;
@@ -62,16 +64,27 @@ export default async function ProduccionPage({
         const precios = await preciosVigentesEn(c.fecha);
         ingreso = 0;
         for (const d of c.detalles) {
-          latas += d.numLatas;
-          panes += d.numLatas * d.panesPorLata;
+          const buenos = unidadesBuenas({
+            numLatas: d.numLatas,
+            panesPorLata: d.panesPorLata,
+            cantidadUnidades: d.cantidadUnidades,
+            mermas: d.mermas,
+          });
+          latas += d.numLatas ?? 0;
+          panes += buenos;
           mermas += d.mermas;
-          const buenos = Math.max(d.numLatas * d.panesPorLata - d.mermas, 0);
           ingreso += buenos * (precios.get(d.productoId) ?? 0);
         }
       } else {
         for (const d of c.detalles) {
-          latas += d.numLatas;
-          panes += d.numLatas * d.panesPorLata;
+          const buenos = unidadesBuenas({
+            numLatas: d.numLatas,
+            panesPorLata: d.panesPorLata,
+            cantidadUnidades: d.cantidadUnidades,
+            mermas: d.mermas,
+          });
+          latas += d.numLatas ?? 0;
+          panes += buenos;
           mermas += d.mermas;
         }
       }

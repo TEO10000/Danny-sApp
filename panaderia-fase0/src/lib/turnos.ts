@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { productosConPrecio } from "@/lib/catalogo";
+import { unidadesBuenas } from "@/lib/produccion-calculo";
 
 export type TipoTurno = "T1_06_14" | "T2_14_22";
 
@@ -53,7 +54,13 @@ type CierrePrevio = {
 };
 
 type CocheVentana = {
-  detalles: Array<{ productoId: string; numLatas: number; panesPorLata: number; mermas: number }>;
+  detalles: Array<{
+    productoId: string;
+    numLatas: number | null;
+    panesPorLata: number | null;
+    cantidadUnidades: number | null;
+    mermas: number;
+  }>;
 };
 
 /**
@@ -103,7 +110,7 @@ export async function datosParaCierre(
     },
     include: {
       detalles: {
-        select: { productoId: true, numLatas: true, panesPorLata: true, mermas: true },
+        select: { productoId: true, numLatas: true, panesPorLata: true, cantidadUnidades: true, mermas: true },
       },
     },
   })) as CocheVentana[];
@@ -111,7 +118,12 @@ export async function datosParaCierre(
   const producidoPor = new Map<string, number>();
   for (const c of coches) {
     for (const d of c.detalles) {
-      const buenos = Math.max(d.numLatas * d.panesPorLata - d.mermas, 0);
+      const buenos = unidadesBuenas({
+        numLatas: d.numLatas,
+        panesPorLata: d.panesPorLata,
+        cantidadUnidades: d.cantidadUnidades,
+        mermas: d.mermas,
+      });
       producidoPor.set(d.productoId, (producidoPor.get(d.productoId) ?? 0) + buenos);
     }
   }

@@ -16,8 +16,9 @@ export default function ListaCoches({
       panadero: { nombre: string };
       detalles: Array<{
         productoId: string;
-        numLatas: number;
-        panesPorLata: number;
+        numLatas: number | null;
+        panesPorLata: number | null;
+        cantidadUnidades: number | null;
         mermas: number;
         producto: { nombre: string };
       }>;
@@ -54,7 +55,10 @@ export default function ListaCoches({
                 </p>
                 <p className="mt-1 text-sm text-corteza-600">
                   {coche.detalles
-                    .map((d) => `${d.producto.nombre} (${d.numLatas}×${d.panesPorLata})`)
+                    .map((d) => {
+                      const base = d.cantidadUnidades != null ? `${d.cantidadUnidades}u` : `${d.numLatas ?? 0}×${d.panesPorLata ?? 0}`;
+                      return `${d.producto.nombre} (${base})`;
+                    })
                     .join(" · ")}
                 </p>
                 <p className="mt-1 text-sm text-corteza-400">

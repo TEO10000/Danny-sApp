@@ -29,6 +29,8 @@ export type ProductoConPrecio = {
   categoria: CategoriaProducto;
   codigoBarras: string | null;
   activo: boolean;
+  modoProduccion: "LATAS" | "UNIDADES";
+  vidaUtilHoras: number | null;
   precioVigente: number | null;
 };
 
@@ -48,6 +50,8 @@ export async function productosConPrecio(soloActivos = false): Promise<ProductoC
     categoria: CategoriaProducto;
     codigoBarras: string | null;
     activo: boolean;
+    modoProduccion: "LATAS" | "UNIDADES";
+    vidaUtilHoras: number | null;
     precios: Array<{ precio: unknown }>;
   };
   return (productos as ProductoCrudo[]).map((p) => ({
@@ -56,6 +60,8 @@ export async function productosConPrecio(soloActivos = false): Promise<ProductoC
     categoria: p.categoria,
     codigoBarras: p.codigoBarras,
     activo: p.activo,
+    modoProduccion: p.modoProduccion,
+    vidaUtilHoras: p.vidaUtilHoras,
     precioVigente: p.precios[0] ? Number(p.precios[0].precio) : null,
   }));
 }

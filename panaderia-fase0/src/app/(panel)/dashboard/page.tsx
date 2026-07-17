@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { produccionBruta, unidadesBuenas } from "@/lib/produccion-calculo";
 import { dinero } from "@/lib/catalogo";
 import { FiltroDashboard } from "./FiltroDashboard";
 
@@ -25,8 +26,9 @@ type CocheFila = {
   sucursalId: string;
   detalles: Array<{
     productoId: string;
-    numLatas: number;
-    panesPorLata: number;
+    numLatas: number | null;
+    panesPorLata: number | null;
+    cantidadUnidades: number | null;
     mermas: number;
   }>;
 };
@@ -149,7 +151,7 @@ export default async function DashboardPage({
         where: { fecha: { gte: desdeDate, lte: hastaDate }, ...sucursalWhere },
         include: {
           detalles: {
-            select: { productoId: true, numLatas: true, panesPorLata: true, mermas: true },
+            select: { productoId: true, numLatas: true, panesPorLata: true, cantidadUnidades: true, mermas: true },
           },
         },
       }),
@@ -218,10 +220,20 @@ export default async function DashboardPage({
 
   for (const coche of coches as CocheFila[]) {
     for (const det of coche.detalles) {
-      const producido = det.numLatas * det.panesPorLata;
+      const producido = unidadesBuenas({
+        numLatas: det.numLatas,
+        panesPorLata: det.panesPorLata,
+        cantidadUnidades: det.cantidadUnidades,
+        mermas: det.mermas,
+      });
       const merma = det.mermas;
-      const efectivo = Math.max(producido - merma, 0);
-      totalProduccion += producido;
+      const efectivo = producido;
+      totalProduccion += Math.max(produccionBruta({
+        numLatas: det.numLatas,
+        panesPorLata: det.panesPorLata,
+        cantidadUnidades: det.cantidadUnidades,
+        mermas: det.mermas,
+      }), 0);
       totalMermas += merma;
       const precio = precioEnFecha(det.productoId, coche.fecha);
       if (precio) ingresoEstimado += efectivo * precio;

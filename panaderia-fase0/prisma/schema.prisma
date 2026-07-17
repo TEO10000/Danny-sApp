@@ -28,6 +28,11 @@ enum CategoriaProducto {
   EMPAQUETADO // leche, avena, etc. (futuro lector de código de barras)
 }
 
+enum ModoProduccion {
+  LATAS
+  UNIDADES
+}
+
 enum TipoTurno {
   T1_06_14
   T2_14_22
@@ -110,11 +115,13 @@ model Sucursal {
 // ===================== Catálogo =====================
 
 model Producto {
-  id           String            @id @default(cuid())
-  nombre       String
-  categoria    CategoriaProducto
-  codigoBarras String?           @unique // preparado para lector inalámbrico futuro
-  activo       Boolean           @default(true)
+  id             String           @id @default(cuid())
+  nombre         String
+  categoria      CategoriaProducto
+  codigoBarras   String?          @unique // preparado para lector inalámbrico futuro
+  activo         Boolean          @default(true)
+  modoProduccion ModoProduccion   @default(LATAS)
+  vidaUtilHoras  Int?
 
   precios          PrecioProducto[]
   detallesCoche    DetalleCoche[]
@@ -227,12 +234,15 @@ model CocheProduccion {
 }
 
 model DetalleCoche {
-  id           String @id @default(cuid())
-  cocheId      String
-  productoId   String
-  numLatas     Int // típicamente 5–14, sin tope rígido
-  panesPorLata Int
-  mermas       Int    @default(0)
+  id               String    @id @default(cuid())
+  cocheId          String
+  productoId       String
+  numLatas         Int?
+  panesPorLata     Int?
+  cantidadUnidades Int?
+  mermas           Int       @default(0)
+  agotado          Boolean   @default(false)
+  agotadoEn        DateTime?
 
   coche    CocheProduccion @relation(fields: [cocheId], references: [id])
   producto Producto        @relation(fields: [productoId], references: [id])

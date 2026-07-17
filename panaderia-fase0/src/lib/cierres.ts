@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { preciosVigentesEn } from "@/lib/catalogo";
+import { unidadesBuenas } from "@/lib/produccion-calculo";
 
 export type TipoTurno = "T1_06_14" | "T2_14_22";
 
@@ -100,11 +101,16 @@ export async function produccionDelTurno(
   const { desde, hasta } = ventanaTurno(fechaISO, turno);
   const detalles = (await prisma.detalleCoche.findMany({
     where: { coche: { sucursalId, fecha: { gte: desde, lt: hasta } } },
-  })) as Array<{ productoId: string; numLatas: number; panesPorLata: number; mermas: number }>;
+  })) as Array<{ productoId: string; numLatas: number | null; panesPorLata: number | null; cantidadUnidades: number | null; mermas: number }>;
 
   const mapa: MapaCantidad = new Map();
   for (const d of detalles) {
-    const buenos = Math.max(d.numLatas * d.panesPorLata - d.mermas, 0);
+    const buenos = unidadesBuenas({
+      numLatas: d.numLatas,
+      panesPorLata: d.panesPorLata,
+      cantidadUnidades: d.cantidadUnidades,
+      mermas: d.mermas,
+    });
     mapa.set(d.productoId, (mapa.get(d.productoId) ?? 0) + buenos);
   }
   return mapa;

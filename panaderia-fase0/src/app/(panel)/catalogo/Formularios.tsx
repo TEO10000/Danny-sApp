@@ -108,6 +108,29 @@ export function FormNuevoProducto() {
             placeholder="Para leche, avena… (futuro lector)"
           />
         </div>
+        <div>
+          <label htmlFor="modoProduccion" className="block text-sm font-semibold text-corteza-800">
+            Modo de producción
+          </label>
+          <select id="modoProduccion" name="modoProduccion" defaultValue="LATAS" className={`mt-1.5 ${inputCls}`}>
+            <option value="LATAS">Latas / panes por lata</option>
+            <option value="UNIDADES">Unidades</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="vidaUtilHoras" className="block text-sm font-semibold text-corteza-800">
+            Vida útil (horas)
+          </label>
+          <input
+            id="vidaUtilHoras"
+            name="vidaUtilHoras"
+            type="number"
+            inputMode="numeric"
+            min="1"
+            className={`mt-1.5 ${inputCls}`}
+            placeholder="24"
+          />
+        </div>
       </div>
       <div className="mt-5">
         <BotonGuardar texto="Agregar al catálogo" />
@@ -156,10 +179,14 @@ export function FormEditarProducto({
   productoId,
   nombreActual,
   categoriaActual,
+  modoActual,
+  vidaUtilActual,
 }: {
   productoId: string;
   nombreActual: string;
   categoriaActual: string;
+  modoActual: "LATAS" | "UNIDADES";
+  vidaUtilActual: number | null;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [estado, accion] = useFormState(editarProducto, null);
@@ -204,6 +231,28 @@ export function FormEditarProducto({
             <option key={c.valor} value={c.valor}>{c.etiqueta}</option>
           ))}
         </select>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-corteza-600">Modo</label>
+        <select
+          name="modoProduccion"
+          defaultValue={modoActual}
+          className="mt-1 rounded-lg border border-masa-200 bg-masa-50 px-2 py-2 text-sm outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30"
+        >
+          <option value="LATAS">Latas</option>
+          <option value="UNIDADES">Unidades</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-corteza-600">Vida útil</label>
+        <input
+          name="vidaUtilHoras"
+          type="number"
+          min="1"
+          defaultValue={vidaUtilActual ?? ""}
+          className="mt-1 w-24 rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2 text-sm outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30"
+          placeholder="24"
+        />
       </div>
       <BotonGuardar texto="Guardar" />
       <button

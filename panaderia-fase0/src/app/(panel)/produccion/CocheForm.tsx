@@ -5,14 +5,16 @@ import { useFormState, useFormStatus } from "react-dom";
 import { registrarCoche, type EstadoCoche } from "./actions";
 import { SelectorBuscador } from "@/components/SelectorBuscador";
 
-type ProductoOpcion = { id: string; nombre: string; precio: number | null };
+type ProductoOpcion = { id: string; nombre: string; precio: number | null; modoProduccion?: "LATAS" | "UNIDADES" };
 type Sucursal = { id: string; nombre: string };
 
 type Fila = {
   clave: number;
   productoId: string;
+  modo: "LATAS" | "UNIDADES";
   numLatas: string;
   panesPorLata: string;
+  cantidadUnidades: string;
   mermas: string;
 };
 
@@ -20,7 +22,7 @@ const inputCls =
   "w-full rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2.5 text-base outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30";
 
 function filaVacia(clave: number): Fila {
-  return { clave, productoId: "", numLatas: "", panesPorLata: "", mermas: "0" };
+  return { clave, productoId: "", modo: "LATAS", numLatas: "", panesPorLata: "", cantidadUnidades: "", mermas: "0" };
 }
 
 function BotonGuardar({ deshabilitado }: { deshabilitado: boolean }) {
@@ -64,28 +66,44 @@ export function CocheForm({
     for (const f of filas) {
       const nl = parseInt(f.numLatas, 10) || 0;
       const ppl = parseInt(f.panesPorLata, 10) || 0;
+      const unidades = parseInt(f.cantidadUnidades, 10) || 0;
       const m = parseInt(f.mermas, 10) || 0;
-      const buenos = Math.max(nl * ppl - m, 0);
-      latas += nl;
-      panes += nl * ppl;
+      const producto = productos.find((p) => p.id === f.productoId);
+      const modo = producto?.modoProduccion ?? f.modo;
+      const producidas = modo === "UNIDADES" ? unidades : nl * ppl;
+      const buenos = Math.max(producidas - m, 0);
+      latas += modo === "LATAS" ? nl : 0;
+      panes += producidas;
       mermas += m;
-      const precio = productos.find((p) => p.id === f.productoId)?.precio ?? 0;
+      const precio = producto?.precio ?? 0;
       ingreso += buenos * precio;
     }
     return { latas, panes, mermas, ingreso };
   }, [filas, productos]);
 
-  const filasCompletas = filas.filter(
-    (f) => f.productoId && parseInt(f.numLatas, 10) > 0 && parseInt(f.panesPorLata, 10) > 0
-  );
+  const filasCompletas = filas.filter((f) => {
+    if (!f.productoId) return false;
+    const producto = productos.find((p) => p.id === f.productoId);
+    const modo = producto?.modoProduccion ?? f.modo;
+    if (modo === "UNIDADES") {
+      return parseInt(f.cantidadUnidades, 10) > 0;
+    }
+    return parseInt(f.numLatas, 10) > 0 && parseInt(f.panesPorLata, 10) > 0;
+  });
 
   const detallesJson = JSON.stringify(
-    filasCompletas.map((f) => ({
-      productoId: f.productoId,
-      numLatas: parseInt(f.numLatas, 10),
-      panesPorLata: parseInt(f.panesPorLata, 10),
-      mermas: parseInt(f.mermas, 10) || 0,
-    }))
+    filasCompletas.map((f) => {
+      const producto = productos.find((p) => p.id === f.productoId);
+      const modo = producto?.modoProduccion ?? f.modo;
+      return {
+        productoId: f.productoId,
+        modo,
+        numLatas: parseInt(f.numLatas, 10) || 1,
+        panesPorLata: parseInt(f.panesPorLata, 10) || 1,
+        cantidadUnidades: parseInt(f.cantidadUnidades, 10) || 1,
+        mermas: parseInt(f.mermas, 10) || 0,
+      };
+    })
   );
 
   return (
@@ -151,10 +169,14 @@ export function CocheForm({
 
       <section className="space-y-3">
         {filas.map((f, i) => {
+          const producto = productos.find((p) => p.id === f.productoId);
+          const modo = producto?.modoProduccion ?? f.modo;
           const nl = parseInt(f.numLatas, 10) || 0;
           const ppl = parseInt(f.panesPorLata, 10) || 0;
+          const unidades = parseInt(f.cantidadUnidades, 10) || 0;
           const m = parseInt(f.mermas, 10) || 0;
-          const buenos = Math.max(nl * ppl - m, 0);
+          const producidas = modo === "UNIDADES" ? unidades : nl * ppl;
+          const buenos = Math.max(producidas - m, 0);
           return (
             <div key={f.clave} className="rounded-panel border border-masa-200 bg-white p-4">
               <div className="flex items-center justify-between">
@@ -182,36 +204,68 @@ export function CocheForm({
                       }))}
                       valorInicial={f.productoId}
                       placeholder="Buscar producto…"
-                      onSeleccion={(id) => editar(f.clave, "productoId", id)}
+                      onSeleccion={(id) => {
+                        const producto = productos.find((p) => p.id === id);
+                        editar(f.clave, "productoId", id);
+                        if (producto?.modoProduccion) {
+                          setFilas((fs) => fs.map((x) => (x.clave === f.clave ? { ...x, modo: producto.modoProduccion as Fila["modo"] } : x)));
+                        }
+                      }}
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-corteza-600">Latas</label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="1"
-                    value={f.numLatas}
-                    onChange={(e) => editar(f.clave, "numLatas", e.target.value)}
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-semibold text-corteza-600">Modo</label>
+                  <select
+                    value={modo}
+                    onChange={(e) => setFilas((fs) => fs.map((x) => (x.clave === f.clave ? { ...x, modo: e.target.value as Fila["modo"] } : x)))}
                     className={`mt-1 ${inputCls}`}
-                    placeholder="14"
-                  />
+                  >
+                    <option value="LATAS">Latas</option>
+                    <option value="UNIDADES">Unidades</option>
+                  </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-corteza-600">
-                    Panes/lata
-                  </label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="1"
-                    value={f.panesPorLata}
-                    onChange={(e) => editar(f.clave, "panesPorLata", e.target.value)}
-                    className={`mt-1 ${inputCls}`}
-                    placeholder="20"
-                  />
-                </div>
+                {modo === "LATAS" ? (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-corteza-600">Latas</label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        value={f.numLatas}
+                        onChange={(e) => editar(f.clave, "numLatas", e.target.value)}
+                        className={`mt-1 ${inputCls}`}
+                        placeholder="14"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-corteza-600">Panes/lata</label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        value={f.panesPorLata}
+                        onChange={(e) => editar(f.clave, "panesPorLata", e.target.value)}
+                        className={`mt-1 ${inputCls}`}
+                        placeholder="20"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-corteza-600">Unidades</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      value={f.cantidadUnidades}
+                      onChange={(e) => editar(f.clave, "cantidadUnidades", e.target.value)}
+                      className={`mt-1 ${inputCls}`}
+                      placeholder="120"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-corteza-600">Mermas</label>
                   <input
@@ -224,9 +278,9 @@ export function CocheForm({
                   />
                 </div>
               </div>
-              {nl > 0 && ppl > 0 && (
+              {((modo === "LATAS" && nl > 0 && ppl > 0) || (modo === "UNIDADES" && unidades > 0)) && (
                 <p className="mt-2 text-sm text-corteza-600">
-                  {nl} latas × {ppl} = <strong>{nl * ppl} panes</strong>
+                  {modo === "LATAS" ? <>{nl} latas × {ppl} = <strong>{nl * ppl} panes</strong></> : `${unidades} unidades`}
                   {m > 0 ? ` (${buenos} buenos tras ${m} de merma)` : ""}
                 </p>
               )}
