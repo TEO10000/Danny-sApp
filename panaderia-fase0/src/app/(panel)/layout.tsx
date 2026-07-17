@@ -5,11 +5,11 @@ import { Sidebar } from "@/components/Sidebar";
 
 const NAV = [
   { href: "/dashboard",    etiqueta: "Dashboard",    icono: "dashboard",    roles: ["ADMIN"] },
-  { href: "/produccion",   etiqueta: "Producción",   icono: "produccion",   roles: ["ADMIN", "PANADERO"] },
+  { href: "/produccion",   etiqueta: "Producción",   icono: "produccion",   roles: ["ADMIN", "PANADERO","ATENCION_CLIENTE"] },
   { href: "/caja",            etiqueta: "Caja",           icono: "caja",            roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { href: "/transferencias",  etiqueta: "Transferencias", icono: "transferencias",  roles: ["ADMIN", "ATENCION_CLIENTE"] },
   { href: "/facturas",        etiqueta: "Facturas",       icono: "facturas",        roles: ["ADMIN", "ATENCION_CLIENTE"] },
-  { href: "/catalogo",     etiqueta: "Catálogo",     icono: "catalogo",     roles: ["ADMIN"] },
+  { href: "/catalogo",     etiqueta: "Catálogo",     icono: "catalogo",     roles: ["ADMIN","ATENCION_CLIENTE"] },
   { href: "/usuarios",     etiqueta: "Usuarios",     icono: "usuarios",     roles: ["ADMIN"] },
   { href: "/precios",      etiqueta: "Precios",      icono: "precios",      roles: ["PANADERO", "ATENCION_CLIENTE"] },
   { href: "/campanias",    etiqueta: "Campañas",     icono: "campanias",    roles: ["ADMIN"] },
