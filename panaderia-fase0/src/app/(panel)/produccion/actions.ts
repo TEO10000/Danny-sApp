@@ -43,22 +43,53 @@ const cocheSchema = z.object({
 
 export type EstadoCoche = { ok: boolean; mensaje: string } | null;
 
+// Tipos locales para los campos añadidos en la migración produccion_modo_flexible,
+// que el cliente Prisma generado puede no tener hasta hacer `prisma generate`.
+type DetalleRaw = {
+  id: string;
+  productoId: string;
+  numLatas: number | null;
+  panesPorLata: number | null;
+  cantidadUnidades: number | null;
+  mermas: number;
+  agotado: boolean;
+  agotadoEn: Date | null;
+  producto: { nombre: string; vidaUtilHoras: number | null; categoria: string };
+};
+
+type AuditLogRaw = {
+  id: string;
+  fecha: Date;
+  accion: string;
+  campo: string | null;
+  valorAnterior: string | null;
+  valorNuevo: string | null;
+  user: { nombre: string };
+};
+
 export async function obtenerDetalleCoche(cocheId: string) {
   const session = await auth();
   if (!session?.user) throw new Error("No autorizado.");
 
-  const coche = await prisma.cocheProduccion.findUniqueOrThrow({
-    where: { id: cocheId },
-    include: {
-      sucursal: { select: { nombre: true } },
-      panadero: { select: { nombre: true } },
-      detalles: {
-        include: { producto: { select: { nombre: true } } },
+  const [coche, auditLogs] = await Promise.all([
+    prisma.cocheProduccion.findUniqueOrThrow({
+      where: { id: cocheId },
+      include: {
+        sucursal: { select: { nombre: true } },
+        panadero: { select: { nombre: true } },
+        detalles: {
+          include: { producto: { select: { nombre: true, vidaUtilHoras: true, categoria: true } } },
+        },
       },
-    },
-  });
+    }),
+    prisma.auditLog.findMany({
+      where: { entidad: "CocheProduccion", entidadId: cocheId },
+      orderBy: { fecha: "desc" },
+      include: { user: { select: { nombre: true } } },
+    }),
+  ]);
 
-  const detalles = coche.detalles.map((detalle) => {
+  const detalles = (coche.detalles as unknown as DetalleRaw[]).map((detalle) => {
     const subtotal = produccionBruta({
       numLatas: detalle.numLatas,
       panesPorLata: detalle.panesPorLata,
@@ -72,13 +103,20 @@ export async function obtenerDetalleCoche(cocheId: string) {
       mermas: detalle.mermas,
     });
     return {
+      detalleId: detalle.id,
       productoId: detalle.productoId,
-      producto: { nombre: detalle.producto.nombre },
-      modo: detalle.cantidadUnidades != null ? "UNIDADES" : "LATAS",
+      producto: {
+        nombre: detalle.producto.nombre,
+        vidaUtilHoras: detalle.producto.vidaUtilHoras,
+        categoria: detalle.producto.categoria,
+      },
+      modo: detalle.cantidadUnidades != null ? ("UNIDADES" as const) : ("LATAS" as const),
       numLatas: detalle.numLatas,
       panesPorLata: detalle.panesPorLata,
       cantidadUnidades: detalle.cantidadUnidades,
       mermas: detalle.mermas,
+      agotado: detalle.agotado,
+      agotadoEn: detalle.agotadoEn?.toISOString() ?? null,
       subtotal,
       buenos,
     };
@@ -92,6 +130,16 @@ export async function obtenerDetalleCoche(cocheId: string) {
     session.user.rol === "ADMIN" ||
     (session.user.rol === "PANADERO" && coche.panaderoId === session.user.id);
 
+  const historial = (auditLogs as unknown as AuditLogRaw[]).map((log) => ({
+    id: log.id,
+    fecha: log.fecha.toISOString(),
+    usuario: log.user.nombre,
+    accion: log.accion,
+    campo: log.campo,
+    valorAnterior: log.valorAnterior,
+    valorNuevo: log.valorNuevo,
+  }));
+
   const base = {
     id: coche.id,
     fecha: coche.fecha.toISOString(),
@@ -103,6 +151,7 @@ export async function obtenerDetalleCoche(cocheId: string) {
     panesTotales,
     mermasTotales,
     puedeEditar,
+    historial,
   };
 
   if (session.user.rol === "ADMIN") {

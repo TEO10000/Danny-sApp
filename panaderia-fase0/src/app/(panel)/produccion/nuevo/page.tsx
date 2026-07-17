@@ -6,7 +6,11 @@ import { CocheForm } from "../CocheForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function NuevoCochePage() {
+export default async function NuevoCochePage({
+  searchParams,
+}: {
+  searchParams: { duplicarDe?: string };
+}) {
   const session = await auth();
   const esAdmin = session?.user?.rol === "ADMIN";
 
@@ -15,7 +19,6 @@ export default async function NuevoCochePage() {
     prisma.sucursal.findMany({ orderBy: { nombre: "asc" } }),
   ]);
 
-  // Hoy y hora actual en Ecuador para los valores por defecto
   const ahoraDate = new Date();
   const hoy = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Guayaquil",
@@ -32,8 +35,7 @@ export default async function NuevoCochePage() {
       <section className="rounded-panel border border-masa-200 bg-white p-6">
         <h2 className="text-xl font-bold text-corteza-900">Registrar coche</h2>
         <p className="mt-2 text-corteza-600">
-          Aún no hay productos en el catálogo, así que no se puede armar un
-          coche. Pide al administrador que agregue los panes y sus precios en la
+          Aún no hay productos en el catálogo. Pide al administrador que agregue los panes en la
           sección Catálogo.
         </p>
         <Link
@@ -46,13 +48,56 @@ export default async function NuevoCochePage() {
     );
   }
 
+  // TAREA 4: soporte para duplicar un coche existente
+  let initialDetalles: Array<{
+    productoId: string;
+    modo: "LATAS" | "UNIDADES";
+    numLatas?: number | null;
+    panesPorLata?: number | null;
+    cantidadUnidades?: number | null;
+    mermas: number;
+  }> | undefined;
+
+  if (searchParams.duplicarDe) {
+    const original = await prisma.cocheProduccion.findUnique({
+      where: { id: searchParams.duplicarDe },
+      select: {
+        detalles: {
+          select: {
+            productoId: true,
+            numLatas: true,
+            panesPorLata: true,
+            cantidadUnidades: true,
+            mermas: true,
+          },
+        },
+      },
+    });
+    if (original) {
+      initialDetalles = original.detalles.map((d) => ({
+        productoId: d.productoId,
+        modo: d.cantidadUnidades != null ? "UNIDADES" : "LATAS",
+        numLatas: d.numLatas,
+        panesPorLata: d.panesPorLata,
+        cantidadUnidades: d.cantidadUnidades,
+        mermas: d.mermas,
+      }));
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-xl font-bold text-corteza-900">Registrar coche</h2>
+        <Link href="/produccion" className="text-sm font-semibold text-horno-600 hover:underline">
+          ← Volver a Producción
+        </Link>
+        <h2 className="mt-2 text-xl font-bold text-corteza-900">
+          {initialDetalles ? "Duplicar coche" : "Registrar coche"}
+        </h2>
         <p className="mt-1 text-sm text-corteza-600">
-          Un coche puede llevar varios panes: agrega una fila por cada tipo, con
-          sus latas y panes por lata.
+          {initialDetalles
+            ? "Revisá las cantidades y ajustá lo que haga falta antes de guardar."
+            : "Agrega una fila por cada tipo de pan, con sus latas y panes por lata."}
         </p>
       </div>
       <CocheForm
@@ -60,11 +105,14 @@ export default async function NuevoCochePage() {
           id: p.id,
           nombre: p.nombre,
           precio: esAdmin ? p.precioVigente : null,
+          modoProduccion: p.modoProduccion,
+          categoria: p.categoria,
         }))}
         sucursales={sucursales}
         hoy={hoy}
         ahora={ahora}
         mostrarIngreso={esAdmin}
+        initialDetalles={initialDetalles}
       />
     </div>
   );

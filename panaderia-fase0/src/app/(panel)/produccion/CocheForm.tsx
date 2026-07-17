@@ -5,24 +5,38 @@ import { useFormState, useFormStatus } from "react-dom";
 import { registrarCoche, type EstadoCoche } from "./actions";
 import { SelectorBuscador } from "@/components/SelectorBuscador";
 
-type ProductoOpcion = { id: string; nombre: string; precio: number | null; modoProduccion?: "LATAS" | "UNIDADES" };
+type ProductoOpcion = {
+  id: string;
+  nombre: string;
+  precio: number | null;
+  modoProduccion: "LATAS" | "UNIDADES";
+  categoria: string;
+};
 type Sucursal = { id: string; nombre: string };
 
 type Fila = {
   clave: number;
   productoId: string;
-  modo: "LATAS" | "UNIDADES";
+  modo: "LATAS" | "UNIDADES" | "";
   numLatas: string;
   panesPorLata: string;
   cantidadUnidades: string;
   mermas: string;
 };
 
+const CATEGORIAS_LABEL: Record<string, string> = {
+  PAN_SAL: "Pan de sal",
+  PAN_DULCE: "Pan de dulce",
+  PASTELERIA: "Pastelería",
+  GALLETERIA: "Galletería",
+  EMPAQUETADO: "Empaquetado",
+};
+
 const inputCls =
   "w-full rounded-lg border border-masa-200 bg-masa-50 px-2.5 py-2.5 text-base outline-none focus:border-horno-500 focus:ring-2 focus:ring-horno-400/30";
 
 function filaVacia(clave: number): Fila {
-  return { clave, productoId: "", modo: "LATAS", numLatas: "", panesPorLata: "", cantidadUnidades: "", mermas: "0" };
+  return { clave, productoId: "", modo: "", numLatas: "", panesPorLata: "", cantidadUnidades: "", mermas: "0" };
 }
 
 function BotonGuardar({ deshabilitado }: { deshabilitado: boolean }) {
@@ -44,39 +58,68 @@ export function CocheForm({
   hoy,
   ahora,
   mostrarIngreso = true,
+  initialDetalles,
 }: {
   productos: ProductoOpcion[];
   sucursales: Sucursal[];
   hoy: string;
   ahora: string;
   mostrarIngreso?: boolean;
+  initialDetalles?: Array<{
+    productoId: string;
+    modo: "LATAS" | "UNIDADES";
+    numLatas?: number | null;
+    panesPorLata?: number | null;
+    cantidadUnidades?: number | null;
+    mermas: number;
+  }>;
 }) {
-  const [filas, setFilas] = useState<Fila[]>([filaVacia(0)]);
+  const [categoriaFiltro, setCategoriaFiltro] = useState<string>("");
+  const [filas, setFilas] = useState<Fila[]>(() => {
+    if (initialDetalles && initialDetalles.length > 0) {
+      return initialDetalles.map((d, i) => ({
+        clave: i,
+        productoId: d.productoId,
+        modo: d.modo,
+        numLatas: String(d.numLatas ?? ""),
+        panesPorLata: String(d.panesPorLata ?? ""),
+        cantidadUnidades: String(d.cantidadUnidades ?? ""),
+        mermas: String(d.mermas),
+      }));
+    }
+    return [filaVacia(0)];
+  });
   const [estado, accion] = useFormState<EstadoCoche, FormData>(registrarCoche, null);
+
+  const categoriasDisponibles = useMemo(
+    () => [...new Set(productos.map((p) => p.categoria))],
+    [productos]
+  );
+
+  const productosFiltrados = useMemo(
+    () => (categoriaFiltro ? productos.filter((p) => p.categoria === categoriaFiltro) : productos),
+    [productos, categoriaFiltro]
+  );
 
   const editar = (clave: number, campo: keyof Fila, valor: string) => {
     setFilas((fs) => fs.map((f) => (f.clave === clave ? { ...f, [campo]: valor } : f)));
   };
 
   const totales = useMemo(() => {
-    let latas = 0;
-    let panes = 0;
-    let mermas = 0;
-    let ingreso = 0;
+    let latas = 0, panes = 0, mermas = 0, ingreso = 0;
     for (const f of filas) {
+      const producto = productos.find((p) => p.id === f.productoId);
+      const modo = producto?.modoProduccion ?? (f.modo || "LATAS");
       const nl = parseInt(f.numLatas, 10) || 0;
       const ppl = parseInt(f.panesPorLata, 10) || 0;
       const unidades = parseInt(f.cantidadUnidades, 10) || 0;
       const m = parseInt(f.mermas, 10) || 0;
-      const producto = productos.find((p) => p.id === f.productoId);
-      const modo = producto?.modoProduccion ?? f.modo;
       const producidas = modo === "UNIDADES" ? unidades : nl * ppl;
       const buenos = Math.max(producidas - m, 0);
       latas += modo === "LATAS" ? nl : 0;
       panes += producidas;
       mermas += m;
-      const precio = producto?.precio ?? 0;
-      ingreso += buenos * precio;
+      ingreso += buenos * (producto?.precio ?? 0);
     }
     return { latas, panes, mermas, ingreso };
   }, [filas, productos]);
@@ -84,17 +127,15 @@ export function CocheForm({
   const filasCompletas = filas.filter((f) => {
     if (!f.productoId) return false;
     const producto = productos.find((p) => p.id === f.productoId);
-    const modo = producto?.modoProduccion ?? f.modo;
-    if (modo === "UNIDADES") {
-      return parseInt(f.cantidadUnidades, 10) > 0;
-    }
+    const modo = producto?.modoProduccion ?? (f.modo || "LATAS");
+    if (modo === "UNIDADES") return parseInt(f.cantidadUnidades, 10) > 0;
     return parseInt(f.numLatas, 10) > 0 && parseInt(f.panesPorLata, 10) > 0;
   });
 
   const detallesJson = JSON.stringify(
     filasCompletas.map((f) => {
       const producto = productos.find((p) => p.id === f.productoId);
-      const modo = producto?.modoProduccion ?? f.modo;
+      const modo = producto?.modoProduccion ?? (f.modo || "LATAS");
       return {
         productoId: f.productoId,
         modo,
@@ -117,60 +158,62 @@ export function CocheForm({
           </label>
           <select id="sucursalId" name="sucursalId" required className={`mt-1.5 ${inputCls}`}>
             {sucursales.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nombre}
-              </option>
+              <option key={s.id} value={s.id}>{s.nombre}</option>
             ))}
           </select>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="fecha" className="block text-sm font-semibold text-corteza-800">
-              Fecha
-            </label>
-            <input
-              id="fecha"
-              name="fecha"
-              type="date"
-              required
-              defaultValue={hoy}
-              className={`mt-1.5 ${inputCls}`}
-            />
+            <label htmlFor="fecha" className="block text-sm font-semibold text-corteza-800">Fecha</label>
+            <input id="fecha" name="fecha" type="date" required defaultValue={hoy} className={`mt-1.5 ${inputCls}`} />
           </div>
           <div>
-            <label htmlFor="hora" className="block text-sm font-semibold text-corteza-800">
-              Hora
-            </label>
-            <input
-              id="hora"
-              name="hora"
-              type="time"
-              required
-              defaultValue={ahora}
-              className={`mt-1.5 ${inputCls}`}
-            />
-            <p className="mt-1 text-xs text-corteza-400">
-              Define a qué turno se suma este coche.
-            </p>
+            <label htmlFor="hora" className="block text-sm font-semibold text-corteza-800">Hora</label>
+            <input id="hora" name="hora" type="time" required defaultValue={ahora} className={`mt-1.5 ${inputCls}`} />
+            <p className="mt-1 text-xs text-corteza-400">Define a qué turno se suma este coche.</p>
           </div>
         </div>
         <div className="sm:col-span-2">
           <label htmlFor="notas" className="block text-sm font-semibold text-corteza-800">
             Notas <span className="font-normal text-corteza-400">(opcional)</span>
           </label>
-          <input
-            id="notas"
-            name="notas"
-            className={`mt-1.5 ${inputCls}`}
-            placeholder="Coche de la tarde, masa nueva…"
-          />
+          <input id="notas" name="notas" className={`mt-1.5 ${inputCls}`} placeholder="Coche de la tarde, masa nueva…" />
         </div>
+      </div>
+
+      {/* Chips de categoría (filtro de búsqueda por cada fila) */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setCategoriaFiltro("")}
+          className={`rounded-full px-3 py-1 text-sm font-semibold transition-colors ${
+            categoriaFiltro === ""
+              ? "bg-horno-500 text-white"
+              : "border border-masa-200 text-corteza-600 hover:bg-masa-100"
+          }`}
+        >
+          Todas
+        </button>
+        {categoriasDisponibles.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => setCategoriaFiltro(cat === categoriaFiltro ? "" : cat)}
+            className={`rounded-full px-3 py-1 text-sm font-semibold transition-colors ${
+              categoriaFiltro === cat
+                ? "bg-horno-500 text-white"
+                : "border border-masa-200 text-corteza-600 hover:bg-masa-100"
+            }`}
+          >
+            {CATEGORIAS_LABEL[cat] ?? cat}
+          </button>
+        ))}
       </div>
 
       <section className="space-y-3">
         {filas.map((f, i) => {
           const producto = productos.find((p) => p.id === f.productoId);
-          const modo = producto?.modoProduccion ?? f.modo;
+          const modo = producto?.modoProduccion ?? (f.modo || "LATAS");
           const nl = parseInt(f.numLatas, 10) || 0;
           const ppl = parseInt(f.panesPorLata, 10) || 0;
           const unidades = parseInt(f.cantidadUnidades, 10) || 0;
@@ -191,13 +234,13 @@ export function CocheForm({
                   </button>
                 )}
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className={`mt-2 grid grid-cols-2 gap-3 ${modo === "UNIDADES" ? "sm:grid-cols-3" : "sm:grid-cols-4"}`}>
                 <div className="col-span-2">
                   <label className="block text-xs font-semibold text-corteza-600">Producto</label>
                   <div className="mt-1">
                     <SelectorBuscador
                       name={`producto-sel-${f.clave}`}
-                      opciones={productos.map((p) => ({
+                      opciones={productosFiltrados.map((p) => ({
                         id: p.id,
                         etiqueta: p.nombre,
                         detalle: p.precio != null ? `$${p.precio.toFixed(2)}` : undefined,
@@ -205,73 +248,59 @@ export function CocheForm({
                       valorInicial={f.productoId}
                       placeholder="Buscar producto…"
                       onSeleccion={(id) => {
-                        const producto = productos.find((p) => p.id === id);
-                        editar(f.clave, "productoId", id);
-                        if (producto?.modoProduccion) {
-                          setFilas((fs) => fs.map((x) => (x.clave === f.clave ? { ...x, modo: producto.modoProduccion as Fila["modo"] } : x)));
-                        }
+                        const prod = productos.find((p) => p.id === id);
+                        setFilas((fs) =>
+                          fs.map((x) =>
+                            x.clave === f.clave
+                              ? { ...x, productoId: id, modo: prod?.modoProduccion ?? "LATAS" }
+                              : x
+                          )
+                        );
                       }}
                     />
                   </div>
-                </div>
-                <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-semibold text-corteza-600">Modo</label>
-                  <select
-                    value={modo}
-                    onChange={(e) => setFilas((fs) => fs.map((x) => (x.clave === f.clave ? { ...x, modo: e.target.value as Fila["modo"] } : x)))}
-                    className={`mt-1 ${inputCls}`}
-                  >
-                    <option value="LATAS">Latas</option>
-                    <option value="UNIDADES">Unidades</option>
-                  </select>
+                  {producto && (
+                    <p className="mt-1 text-xs text-corteza-400">
+                      {modo === "LATAS" ? "Se produce por latas" : "Se produce por unidades"}
+                    </p>
+                  )}
                 </div>
                 {modo === "LATAS" ? (
                   <>
                     <div>
                       <label className="block text-xs font-semibold text-corteza-600">Latas</label>
                       <input
-                        type="number"
-                        inputMode="numeric"
-                        min="1"
+                        type="number" inputMode="numeric" min="1"
                         value={f.numLatas}
                         onChange={(e) => editar(f.clave, "numLatas", e.target.value)}
-                        className={`mt-1 ${inputCls}`}
-                        placeholder="14"
+                        className={`mt-1 ${inputCls}`} placeholder="14"
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-corteza-600">Panes/lata</label>
                       <input
-                        type="number"
-                        inputMode="numeric"
-                        min="1"
+                        type="number" inputMode="numeric" min="1"
                         value={f.panesPorLata}
                         onChange={(e) => editar(f.clave, "panesPorLata", e.target.value)}
-                        className={`mt-1 ${inputCls}`}
-                        placeholder="20"
+                        className={`mt-1 ${inputCls}`} placeholder="20"
                       />
                     </div>
                   </>
                 ) : (
-                  <div className="sm:col-span-2">
+                  <div>
                     <label className="block text-xs font-semibold text-corteza-600">Unidades</label>
                     <input
-                      type="number"
-                      inputMode="numeric"
-                      min="1"
+                      type="number" inputMode="numeric" min="1"
                       value={f.cantidadUnidades}
                       onChange={(e) => editar(f.clave, "cantidadUnidades", e.target.value)}
-                      className={`mt-1 ${inputCls}`}
-                      placeholder="120"
+                      className={`mt-1 ${inputCls}`} placeholder="120"
                     />
                   </div>
                 )}
                 <div>
                   <label className="block text-xs font-semibold text-corteza-600">Mermas</label>
                   <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
+                    type="number" inputMode="numeric" min="0"
                     value={f.mermas}
                     onChange={(e) => editar(f.clave, "mermas", e.target.value)}
                     className={`mt-1 ${inputCls}`}
@@ -280,7 +309,9 @@ export function CocheForm({
               </div>
               {((modo === "LATAS" && nl > 0 && ppl > 0) || (modo === "UNIDADES" && unidades > 0)) && (
                 <p className="mt-2 text-sm text-corteza-600">
-                  {modo === "LATAS" ? <>{nl} latas × {ppl} = <strong>{nl * ppl} panes</strong></> : `${unidades} unidades`}
+                  {modo === "LATAS"
+                    ? <>{nl} latas × {ppl} = <strong>{nl * ppl} panes</strong></>
+                    : `${unidades} unidades`}
                   {m > 0 ? ` (${buenos} buenos tras ${m} de merma)` : ""}
                 </p>
               )}
@@ -317,25 +348,14 @@ export function CocheForm({
           {mostrarIngreso && (
             <div>
               <dt className="text-corteza-400">Ingreso estimado</dt>
-              <dd className="text-lg font-bold text-cuadre-ok">
-                ${totales.ingreso.toFixed(2)}
-              </dd>
+              <dd className="text-lg font-bold text-cuadre-ok">${totales.ingreso.toFixed(2)}</dd>
             </div>
           )}
         </dl>
-        {mostrarIngreso && (
-          <p className="mt-2 text-xs text-corteza-400">
-            Ingreso si se vende todo el pan bueno al precio vigente. La ganancia
-            neta se mostrará cuando se registren los costos de insumos (Fase 3).
-          </p>
-        )}
       </section>
 
       {estado && !estado.ok && (
-        <p
-          role="alert"
-          className="rounded-lg bg-cuadre-mal/10 px-3 py-2 text-sm font-medium text-cuadre-mal"
-        >
+        <p role="alert" className="rounded-lg bg-cuadre-mal/10 px-3 py-2 text-sm font-medium text-cuadre-mal">
           {estado.mensaje}
         </p>
       )}

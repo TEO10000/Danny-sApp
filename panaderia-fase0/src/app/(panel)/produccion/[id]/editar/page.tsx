@@ -19,13 +19,21 @@ export default async function EditarCochePage({ params }: { params: { id: string
   const coche = await prisma.cocheProduccion.findUnique({
     where: { id: params.id },
     include: {
-      detalles: { include: { producto: { select: { nombre: true } } } },
       sucursal: { select: { nombre: true } },
+      detalles: {
+        select: {
+          productoId: true,
+          numLatas: true,
+          panesPorLata: true,
+          cantidadUnidades: true,
+          mermas: true,
+          producto: { select: { nombre: true } },
+        },
+      },
     },
   });
   if (!coche) notFound();
 
-  // Verificar permisos para PANADERO
   if (rol === "PANADERO") {
     if (coche.panaderoId !== userId) redirect("/produccion");
     const cocheEnEcuador = new Intl.DateTimeFormat("en-CA", {
@@ -49,11 +57,12 @@ export default async function EditarCochePage({ params }: { params: { id: string
     hour12: false,
   }).format(coche.fecha);
 
-  // Para PANADERO no enviar precios (RF-P07)
   const productosParaForm = productos.map((p) => ({
     id: p.id,
     nombre: p.nombre,
     precio: rol === "ADMIN" ? p.precioVigente : null,
+    modoProduccion: p.modoProduccion,
+    categoria: p.categoria,
   }));
 
   return (
@@ -77,8 +86,10 @@ export default async function EditarCochePage({ params }: { params: { id: string
         initialNotas={coche.notas ?? ""}
         initialDetalles={coche.detalles.map((d) => ({
           productoId: d.productoId,
+          modo: d.cantidadUnidades != null ? ("UNIDADES" as const) : ("LATAS" as const),
           numLatas: d.numLatas,
           panesPorLata: d.panesPorLata,
+          cantidadUnidades: d.cantidadUnidades,
           mermas: d.mermas,
         }))}
         mostrarIngreso={rol === "ADMIN"}

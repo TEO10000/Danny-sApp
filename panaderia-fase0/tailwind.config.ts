@@ -30,6 +30,12 @@ const config: Config = {
           ok: "#2e7d4f",
           mal: "#b3362b",
         },
+        // madrugada: azul frío para diferenciar la sucursal Consejo del naranja de horno
+        madrugada: {
+          100: "#dde8f5",
+          500: "#2d6fa8",
+          600: "#235994",
+        },
       },
       borderRadius: {
         panel: "1rem",
