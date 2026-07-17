@@ -218,7 +218,7 @@ export default async function ProduccionPage({
         className="fixed bottom-6 right-6 z-20 hidden rounded-full bg-horno-500 px-5 py-3.5 text-touch-lg text-white shadow-lg hover:bg-horno-600 sm:flex sm:items-center sm:gap-2"
         style={{ paddingBottom: "calc(0.875rem + env(safe-area-inset-bottom, 0px))" }}
       >
-        + Registrar coche
+        + Agregar Produción
       </Link>
     </div>
   );
