@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function EditarCochePage({ params }: { params: { id: string } }) {
   const session = await auth();
   const rol = session?.user?.rol;
-  if (!session?.user?.id || (rol !== "ADMIN" && rol !== "PANADERO")) {
+  if (!session?.user?.id || !["ADMIN", "PANADERO", "ATENCION_CLIENTE"].includes(rol ?? "")) {
     redirect("/produccion");
   }
   const userId = session.user.id;
@@ -34,7 +34,7 @@ export default async function EditarCochePage({ params }: { params: { id: string
   });
   if (!coche) notFound();
 
-  if (rol === "PANADERO") {
+  if (rol === "PANADERO" || rol === "ATENCION_CLIENTE") {
     if (coche.panaderoId !== userId) redirect("/produccion");
     const cocheEnEcuador = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Guayaquil",

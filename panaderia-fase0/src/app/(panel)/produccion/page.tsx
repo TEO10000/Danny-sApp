@@ -33,6 +33,7 @@ export default async function ProduccionPage({
   const userId = session?.user?.id;
   const esAdmin = rol === "ADMIN";
   const esPanadero = rol === "PANADERO";
+  const esAtencion = rol === "ATENCION_CLIENTE";
   const hoy = hoyEcuador();
 
   const coches = await prisma.cocheProduccion.findMany({
@@ -98,7 +99,7 @@ export default async function ProduccionPage({
       }).format(c.fecha);
       const puedeEditar =
         esAdmin ||
-        (esPanadero && c.panaderoId === userId && cocheEnEcuador === hoy);
+        ((esPanadero || esAtencion) && c.panaderoId === userId && cocheEnEcuador === hoy);
 
       return {
         coche: {

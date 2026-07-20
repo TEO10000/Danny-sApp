@@ -172,7 +172,7 @@ export async function registrarCoche(
 ): Promise<EstadoCoche> {
   const session = await auth();
   const rol = session?.user?.rol;
-  if (!session?.user?.id || (rol !== "ADMIN" && rol !== "PANADERO")) {
+  if (!session?.user?.id || !["ADMIN", "PANADERO", "ATENCION_CLIENTE"].includes(rol ?? "")) {
     return { ok: false, mensaje: "No tienes permiso para registrar producción." };
   }
 
@@ -264,7 +264,7 @@ export async function registrarCoche(
 export async function marcarAgotado(detalleId: string, agotado: boolean) {
   const session = await auth();
   const rol = session?.user?.rol;
-  if (!session?.user?.id || (rol !== "ADMIN" && rol !== "PANADERO")) {
+  if (!session?.user?.id || !["ADMIN", "PANADERO", "ATENCION_CLIENTE"].includes(rol ?? "")) {
     throw new Error("No tienes permiso para actualizar producción.");
   }
 
@@ -283,7 +283,7 @@ export async function editarCoche(
 ): Promise<EstadoCoche> {
   const session = await auth();
   const rol = session?.user?.rol;
-  if (!session?.user?.id || (rol !== "ADMIN" && rol !== "PANADERO")) {
+  if (!session?.user?.id || !["ADMIN", "PANADERO", "ATENCION_CLIENTE"].includes(rol ?? "")) {
     return { ok: false, mensaje: "No tienes permiso para editar producción." };
   }
   const userId = session.user.id;
@@ -351,8 +351,8 @@ export async function editarCoche(
         include: { detalles: true },
       });
 
-      // Permisos: PANADERO solo sus coches de hoy
-      if (rol === "PANADERO") {
+      // Permisos: PANADERO y ATENCION_CLIENTE solo sus propios coches de hoy
+      if (rol === "PANADERO" || rol === "ATENCION_CLIENTE") {
         if (cocheActual.panaderoId !== userId) {
           throw new Error("PERMISO: solo puedes editar tus propios coches.");
         }
